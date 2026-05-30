@@ -1,0 +1,43 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica,
+    Arial, sans-serif;
+  background: #0f0f17;
+  color: #f5f5f7;
+  overscroll-behavior: none;
+}
+
+/* Prevent text selection / long-press menus during the game */
+.no-select {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  touch-action: manipulation;
+}
+
+.hold-target {
+  touch-action: none;
+}
+
+/* Full-height, safe-area aware screen container */
+.screen {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  padding: max(1rem, env(safe-area-inset-top)) 1rem
+    max(1rem, env(safe-area-inset-bottom)) 1rem;
+}

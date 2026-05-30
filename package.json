@@ -1,0 +1,16 @@
+{
+  "name": "chwazi-multiplayer",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Real-time multiplayer finger-chooser (Chwazi-style). Single deploy: Express serves the built client + Socket.IO.",
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "render-build": "npm install --prefix server && npm install --prefix client && npm run build --prefix client",
+    "start": "node server/index.js",
+    "dev:server": "npm run dev --prefix server",
+    "dev:client": "npm run dev --prefix client"
+  }
+}
