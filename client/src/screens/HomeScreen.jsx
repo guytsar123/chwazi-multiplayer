@@ -1,9 +1,26 @@
 import { useState, useEffect } from "react";
 
+// Appearance options. The server accepts any #rrggbb and any short emoji, and
+// auto-assigns a unique one if we send nothing — so "🎲 auto" just sends undefined.
+const PALETTE = [
+  "#ef4444", "#f97316", "#f59e0b", "#eab308", "#84cc16",
+  "#22c55e", "#10b981", "#14b8a6", "#06b6d4", "#3b82f6",
+  "#6366f1", "#8b5cf6", "#a855f7", "#d946ef", "#ec4899",
+];
+const EMOJIS = [
+  "🦊", "🐼", "🐸", "🦄", "🐙", "🦁", "🐵", "🐯", "🐧", "🦉",
+  "🐝", "🦋", "🐢", "🐶", "🐱", "🐰", "🐨", "🐮", "🐷", "🐔",
+  "🦖", "🐳", "⭐", "🔥", "🍀", "🌈", "👾", "🚀", "⚡", "🎯",
+];
+
 export default function HomeScreen({ onCreate, onJoin, error, connected }) {
   const [mode, setMode] = useState(null); // null | "create" | "join"
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
+
+  // Appearance: null = auto (🎲). Otherwise an explicit choice.
+  const [emoji, setEmoji] = useState(null);
+  const [color, setColor] = useState(null);
 
   // Pre-fill the room code from a ?room=CODE deep link (QR scan).
   useEffect(() => {
@@ -21,9 +38,13 @@ export default function HomeScreen({ onCreate, onJoin, error, connected }) {
 
   const submit = () => {
     if (!canSubmit) return;
-    if (mode === "create") onCreate(name.trim());
-    else onJoin(code.trim().toUpperCase(), name.trim());
+    // emoji/color may be null → server auto-assigns.
+    if (mode === "create") onCreate(name.trim(), emoji, color);
+    else onJoin(code.trim().toUpperCase(), name.trim(), emoji, color);
   };
+
+  const previewColor = color || "#3b82f6";
+  const previewEmoji = emoji || "🎲";
 
   return (
     <div className="screen items-center justify-center text-center">
@@ -50,7 +71,25 @@ export default function HomeScreen({ onCreate, onJoin, error, connected }) {
         )}
 
         {mode && (
-          <div className="w-full space-y-3">
+          <div className="w-full space-y-4">
+            {/* Live preview of your puck */}
+            <div className="flex flex-col items-center gap-2">
+              <div
+                className="w-20 h-20 rounded-full flex items-center justify-center text-4xl"
+                style={{
+                  backgroundColor: previewColor,
+                  boxShadow: "0 0 0 4px rgba(255,255,255,0.15)",
+                }}
+              >
+                {previewEmoji}
+              </div>
+              {!emoji && !color && (
+                <span className="text-white/40 text-xs">
+                  Auto — or pick your look below
+                </span>
+              )}
+            </div>
+
             <input
               autoFocus
               value={name}
@@ -72,6 +111,60 @@ export default function HomeScreen({ onCreate, onJoin, error, connected }) {
               />
             )}
 
+            {/* Emoji picker */}
+            <div className="text-left">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-white/50 text-xs">Avatar</span>
+                <button
+                  onClick={() => setEmoji(null)}
+                  className="text-white/40 text-xs active:text-white/70"
+                >
+                  🎲 auto
+                </button>
+              </div>
+              <div className="flex gap-1.5 overflow-x-auto pb-1 -mx-1 px-1">
+                {EMOJIS.map((e) => (
+                  <button
+                    key={e}
+                    onClick={() => setEmoji(e)}
+                    className={`shrink-0 w-10 h-10 rounded-xl flex items-center justify-center text-xl transition ${
+                      emoji === e
+                        ? "bg-white/25 ring-2 ring-white"
+                        : "bg-white/5 active:bg-white/15"
+                    }`}
+                  >
+                    {e}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Color picker */}
+            <div className="text-left">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-white/50 text-xs">Color</span>
+                <button
+                  onClick={() => setColor(null)}
+                  className="text-white/40 text-xs active:text-white/70"
+                >
+                  🎲 auto
+                </button>
+              </div>
+              <div className="flex gap-2 flex-wrap">
+                {PALETTE.map((c) => (
+                  <button
+                    key={c}
+                    onClick={() => setColor(c)}
+                    className={`w-8 h-8 rounded-full transition ${
+                      color === c ? "ring-2 ring-white ring-offset-2 ring-offset-[#0f0f17]" : ""
+                    }`}
+                    style={{ backgroundColor: c }}
+                    aria-label={c}
+                  />
+                ))}
+              </div>
+            </div>
+
             <button
               onClick={submit}
               disabled={!canSubmit || !connected}
@@ -80,10 +173,7 @@ export default function HomeScreen({ onCreate, onJoin, error, connected }) {
               {mode === "create" ? "Create" : "Join"}
             </button>
             <button
-              onClick={() => {
-                setMode(null);
-                setError;
-              }}
+              onClick={() => setMode(null)}
               className="w-full py-2 text-white/40 text-sm"
             >
               ← Back

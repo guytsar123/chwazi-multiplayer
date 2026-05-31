@@ -4,11 +4,12 @@ import { useWakeLock } from "./useWakeLock";
 import HomeScreen from "./screens/HomeScreen.jsx";
 import LobbyScreen from "./screens/LobbyScreen.jsx";
 import CountdownScreen from "./screens/CountdownScreen.jsx";
-import HoldScreen from "./screens/HoldScreen.jsx";
-import ResultScreen from "./screens/ResultScreen.jsx";
+import ArenaScreen from "./screens/ArenaScreen.jsx";
 
 export default function App() {
-  // screen: "home" | "lobby" | "countdown" | "hold" | "result"
+  // screen: "home" | "lobby" | "countdown" | "arena"
+  // The arena covers both holding/selecting and the result reveal, so the
+  // winner flood animates seamlessly without a screen swap.
   const [screen, setScreen] = useState("home");
   const [connected, setConnected] = useState(socket.connected);
   const [error, setError] = useState("");
@@ -20,11 +21,13 @@ export default function App() {
 
   const [countdown, setCountdown] = useState(3);
   const [ready, setReady] = useState({ readyCount: 0, totalCount: 0, readyIds: [] });
-  const [result, setResult] = useState(null); // { chosenPlayerId, ... }
+  // suspense: drives the synchronized ring-sweep on every device.
+  const [suspense, setSuspense] = useState(null); // { startedAt, durationMs } | null
+  const [result, setResult] = useState(null); // { chosenPlayerId, ... } | null
   const [history, setHistory] = useState([]);
 
   const isHost = me && hostId && me.id === hostId;
-  const sessionActive = ["lobby", "countdown", "hold", "result"].includes(screen);
+  const sessionActive = ["lobby", "countdown", "arena"].includes(screen);
   useWakeLock(sessionActive);
 
   // ---- socket lifecycle ----------------------------------------------------
@@ -36,35 +39,41 @@ export default function App() {
     };
     const onDisconnect = () => setConnected(false);
 
-    const onLobbyUpdate = ({ players, hostId, state }) => {
+    const onLobbyUpdate = ({ players, hostId }) => {
       setPlayers(players);
       setHostId(hostId);
-      // If a round result is showing and host resets remotely, the lobby_reset
-      // event handles screen change; here we only sync the roster.
-      if (state === "waiting" && screen === "result") {
-        // wait for explicit lobby_reset to move screens
-      }
     };
 
     const onRoundStarted = ({ countdown }) => {
-      setCountdown(countdown);
       setResult(null);
+      setSuspense(null);
+      setReady({ readyCount: 0, totalCount: 0, readyIds: [] });
+      setCountdown(countdown);
       setScreen("countdown");
     };
     const onCountdownTick = ({ countdown }) => setCountdown(countdown);
     const onSelectionStarted = ({ totalCount }) => {
       setReady({ readyCount: 0, totalCount, readyIds: [] });
-      setScreen("hold");
+      setResult(null);
+      setSuspense(null);
+      setScreen("arena");
     };
     const onReadyUpdate = (payload) => setReady(payload);
+    const onSuspenseStarted = ({ durationMs }) => {
+      setSuspense({ startedAt: Date.now(), durationMs });
+    };
+    const onSuspenseCancelled = () => setSuspense(null);
     const onRoundResult = (payload) => {
+      setSuspense(null);
       setResult(payload);
       if (payload.history) setHistory(payload.history);
-      setScreen("result");
-      if (navigator.vibrate) navigator.vibrate([40, 60, 120]);
+      setScreen("arena");
+      if (navigator.vibrate) navigator.vibrate([40, 60, 160]);
     };
     const onLobbyReset = () => {
       setResult(null);
+      setSuspense(null);
+      setReady({ readyCount: 0, totalCount: 0, readyIds: [] });
       setScreen("lobby");
     };
     const onHostChanged = ({ hostId }) => setHostId(hostId);
@@ -84,6 +93,8 @@ export default function App() {
     socket.on("countdown_tick", onCountdownTick);
     socket.on("selection_started", onSelectionStarted);
     socket.on("ready_update", onReadyUpdate);
+    socket.on("suspense_started", onSuspenseStarted);
+    socket.on("suspense_cancelled", onSuspenseCancelled);
     socket.on("round_result", onRoundResult);
     socket.on("lobby_reset", onLobbyReset);
     socket.on("host_changed", onHostChanged);
@@ -97,12 +108,14 @@ export default function App() {
       socket.off("countdown_tick", onCountdownTick);
       socket.off("selection_started", onSelectionStarted);
       socket.off("ready_update", onReadyUpdate);
+      socket.off("suspense_started", onSuspenseStarted);
+      socket.off("suspense_cancelled", onSuspenseCancelled);
       socket.off("round_result", onRoundResult);
       socket.off("lobby_reset", onLobbyReset);
       socket.off("host_changed", onHostChanged);
       socket.off("lobby_closed", onLobbyClosed);
     };
-  }, [screen]);
+  }, []);
 
   const resetToHome = useCallback(() => {
     setScreen("home");
@@ -111,13 +124,14 @@ export default function App() {
     setPlayers([]);
     setHostId(null);
     setResult(null);
+    setSuspense(null);
     setHistory([]);
   }, []);
 
   // ---- actions -------------------------------------------------------------
-  const createLobby = useCallback((hostName) => {
+  const createLobby = useCallback((hostName, emoji, color) => {
     setError("");
-    socket.emit("create_lobby", { hostName }, (res) => {
+    socket.emit("create_lobby", { hostName, emoji, color }, (res) => {
       if (!res?.ok) {
         setError(res?.error || "Could not create lobby");
         return;
@@ -129,18 +143,22 @@ export default function App() {
     });
   }, []);
 
-  const joinLobby = useCallback((code, playerName) => {
+  const joinLobby = useCallback((code, playerName, emoji, color) => {
     setError("");
-    socket.emit("join_lobby", { roomCode: code, playerName }, (res) => {
-      if (!res?.ok) {
-        setError(res?.error || "Could not join lobby");
-        return;
+    socket.emit(
+      "join_lobby",
+      { roomCode: code, playerName, emoji, color },
+      (res) => {
+        if (!res?.ok) {
+          setError(res?.error || "Could not join lobby");
+          return;
+        }
+        setRoomCode(res.roomCode);
+        setMe(res.you);
+        setHistory(res.history || []);
+        setScreen("lobby");
       }
-      setRoomCode(res.roomCode);
-      setMe(res.you);
-      setHistory(res.history || []);
-      setScreen("lobby");
-    });
+    );
   }, []);
 
   const startRound = useCallback(() => socket.emit("start_round"), []);
@@ -187,21 +205,16 @@ export default function App() {
         <CountdownScreen countdown={countdown} me={me} />
       )}
 
-      {screen === "hold" && (
-        <HoldScreen
+      {screen === "arena" && (
+        <ArenaScreen
           me={me}
           players={players}
           ready={ready}
-          onReadyChange={setReadyState}
-        />
-      )}
-
-      {screen === "result" && (
-        <ResultScreen
+          suspense={suspense}
           result={result}
-          me={me}
           isHost={isHost}
           history={history}
+          onReadyChange={setReadyState}
           onPlayAgain={playAgain}
           onLeave={leaveLobby}
         />

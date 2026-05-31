@@ -4,6 +4,7 @@ import { Server } from "socket.io";
 import cors from "cors";
 import path from "path";
 import { fileURLToPath } from "url";
+import { randomInt } from "crypto";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -13,8 +14,8 @@ const PORT = process.env.PORT || 3001;
 // Tunable timing / rules
 // ---------------------------------------------------------------------------
 const COUNTDOWN_SECONDS = 3; // 3...2...1...GO
-const SELECT_TIMEOUT_MS = 10000; // max wait for everyone to hold
-const ALL_READY_DELAY_MS = 1500; // suspense delay once everyone is holding
+const SELECT_TIMEOUT_MS = 15000; // max wait for everyone to hold
+const ALL_READY_DELAY_MS = 2200; // suspense duration: the synchronized ring sweep
 const LOBBY_TTL_MS = 30 * 60 * 1000; // 30 min of inactivity -> cleanup
 const MIN_PLAYERS = 2;
 const MAX_HISTORY = 5;
@@ -74,6 +75,23 @@ function pickEmoji(lobby) {
   const free = EMOJIS.filter((e) => !used.has(e));
   const pool = free.length ? free : EMOJIS;
   return pool[Math.floor(Math.random() * pool.length)];
+}
+
+// Players may pick their own appearance on the home screen; validate the choice
+// against our known sets and fall back to an auto-assigned one. Color may be any
+// hex the client offers from its palette; we accept a simple #rrggbb.
+function chooseColor(lobby, wanted) {
+  if (typeof wanted === "string" && /^#[0-9a-fA-F]{6}$/.test(wanted)) {
+    return wanted;
+  }
+  return pickColor(lobby);
+}
+
+function chooseEmoji(lobby, wanted) {
+  if (typeof wanted === "string" && wanted.length > 0 && wanted.length <= 8) {
+    return wanted;
+  }
+  return pickEmoji(lobby);
 }
 
 function clearTimers(lobby) {
@@ -173,6 +191,7 @@ function onPlayerUnready(lobby, socketId) {
   if (lobby.timers.allReady) {
     clearTimeout(lobby.timers.allReady);
     lobby.timers.allReady = null;
+    io.to(lobby.roomCode).emit("suspense_cancelled", {});
   }
 }
 
@@ -189,7 +208,12 @@ function maybeResolve(lobby) {
   const everyone =
     lobby.players.size > 0 && lobby.ready.size >= lobby.players.size;
   if (everyone && !lobby.timers.allReady) {
-    // Everybody is holding — short dramatic pause, then choose.
+    // Everybody is holding — kick off the synchronized suspense sweep on every
+    // device, then choose when it completes. We send the duration so all clients
+    // animate the ring-fill in lockstep and reveal at the same moment.
+    io.to(lobby.roomCode).emit("suspense_started", {
+      durationMs: ALL_READY_DELAY_MS,
+    });
     lobby.timers.allReady = setTimeout(() => {
       resolveRound(lobby);
     }, ALL_READY_DELAY_MS);
@@ -246,7 +270,7 @@ io.on("connection", (socket) => {
     return code ? lobbies.get(code) : null;
   };
 
-  socket.on("create_lobby", ({ hostName }, ack) => {
+  socket.on("create_lobby", ({ hostName, emoji, color }, ack) => {
     const roomCode = genCode();
     const lobby = {
       roomCode,
@@ -261,8 +285,8 @@ io.on("connection", (socket) => {
     const player = {
       id: socket.id,
       name: (hostName || "Host").slice(0, 16),
-      emoji: pickEmoji(lobby),
-      color: pickColor(lobby),
+      emoji: chooseEmoji(lobby, emoji),
+      color: chooseColor(lobby, color),
     };
     lobby.players.set(socket.id, player);
     lobbies.set(roomCode, lobby);
@@ -274,7 +298,7 @@ io.on("connection", (socket) => {
     broadcastPlayers(lobby);
   });
 
-  socket.on("join_lobby", ({ roomCode, playerName }, ack) => {
+  socket.on("join_lobby", ({ roomCode, playerName, emoji, color }, ack) => {
     const code = (roomCode || "").toUpperCase().trim();
     const lobby = lobbies.get(code);
     if (!lobby) {
@@ -284,8 +308,8 @@ io.on("connection", (socket) => {
     const player = {
       id: socket.id,
       name: (playerName || "Player").slice(0, 16),
-      emoji: pickEmoji(lobby),
-      color: pickColor(lobby),
+      emoji: chooseEmoji(lobby, emoji),
+      color: chooseColor(lobby, color),
     };
     lobby.players.set(socket.id, player);
     socket.data.roomCode = code;
