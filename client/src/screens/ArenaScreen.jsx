@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import confetti from "canvas-confetti";
 import { serverTime } from "../socket";
+import { useI18n } from "../i18n.jsx";
 import {
   unlock,
   startTone,
@@ -59,6 +60,7 @@ export default function ArenaScreen({
   onPlayAgain,
   onLeave,
 }) {
+  const { t } = useI18n();
   const canvasRef = useRef(null);
   const [muted, setMutedState] = useState(isMuted());
 
@@ -524,12 +526,12 @@ export default function ArenaScreen({
   const headline = !result
     ? null
     : result.mode === "groups"
-    ? `${result.count} קבוצות!`
+    ? t("teamsResult", { n: result.count })
     : result.mode === "multiple"
-    ? `${(result.winners || []).map((wv) => wv.name).join(", ")} נבחרו!`
+    ? t("multipleChosen", { names: (result.winners || []).map((wv) => wv.name).join(", ") })
     : amWinner
-    ? "זה אתה! 🎉"
-    : `${result.winners[0].name} נבחר`;
+    ? t("youWin")
+    : t("chosen", { name: result.winners[0].name });
 
   return (
     <div className="relative h-full w-full overflow-hidden" style={{ background: BG }}>
@@ -547,7 +549,7 @@ export default function ArenaScreen({
       <button
         onClick={toggleMute}
         className="absolute top-[max(0.75rem,env(safe-area-inset-top))] right-3 z-10 w-10 h-10 rounded-full bg-white/10 active:bg-white/20 text-lg flex items-center justify-center"
-        aria-label={muted ? "בטל השתקה" : "השתק"}
+        aria-label={muted ? t("unmute") : t("mute")}
       >
         {muted ? "🔇" : "🔊"}
       </button>
@@ -557,13 +559,13 @@ export default function ArenaScreen({
         {result ? (
           <p className="text-white text-xl font-bold drop-shadow">{headline}</p>
         ) : suspense ? (
-          <p className="text-white/95 text-xl font-bold">בוחר…</p>
+          <p className="text-white/95 text-xl font-bold">{t("choosing")}</p>
         ) : (
           <>
             <p className="text-white/85 text-lg font-medium">
-              {ready.readyCount} / {ready.totalCount} מחזיקים
+              {t("holding", { ready: ready.readyCount, total: ready.totalCount })}
             </p>
-            <p className="text-white/40 text-sm">החזיקו את העיגול • גררו אותו</p>
+            <p className="text-white/40 text-sm">{t("holdHint")}</p>
           </>
         )}
       </div>
@@ -577,18 +579,18 @@ export default function ArenaScreen({
                 onClick={onPlayAgain}
                 className="w-full py-4 rounded-2xl bg-white text-black active:bg-white/80 font-bold text-lg transition"
               >
-                שחק שוב
+                {t("playAgain")}
               </button>
             ) : (
-              <p className="text-center text-white/70">ממתינים שהמארח יתחיל סיבוב חדש…</p>
+              <p className="text-center text-white/70">{t("waitingPlayAgain")}</p>
             )}
             <button onClick={onLeave} className="w-full py-2 text-white/50 text-sm">
-              יציאה
+              {t("leave")}
             </button>
           </div>
         ) : (
           <p className="pointer-events-none text-center text-white/50 text-sm">
-            {meReady ? "מחזיק — אל תעזוב ✋" : "החזיקו את העיגול כדי להצטרף"}
+            {meReady ? t("holdingDontLetGo") : t("holdToJoin")}
           </p>
         )}
       </div>

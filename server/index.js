@@ -310,7 +310,7 @@ function resolveRound(lobby) {
       );
     });
     result = { mode: "groups", count: groupCount, groups: assignment };
-    lobby.history.unshift({ name: `${groupCount} קבוצות`, at: Date.now() });
+    lobby.history.unshift({ teams: groupCount, at: Date.now() });
   } else {
     const n = lobby.mode === "multiple" ? Math.max(1, Math.min(lobby.count, pool.length)) : 1;
     const winnerIds = cryptoShuffle(pool).slice(0, n);
@@ -350,7 +350,7 @@ io.on("connection", (socket) => {
   });
 
   socket.on("create_lobby", ({ playerId, hostName, mode, count } = {}, ack) => {
-    if (!playerId) { if (ack) ack({ ok: false, error: "מזהה חסר" }); return; }
+    if (!playerId) { if (ack) ack({ ok: false, error: "missing_id" }); return; }
     const roomCode = genCode();
     const lobby = {
       roomCode,
@@ -368,7 +368,7 @@ io.on("connection", (socket) => {
     };
     const player = {
       id: playerId,
-      name: (hostName || "מארח").slice(0, 16),
+      name: (hostName || "Host").slice(0, 16),
       color: chooseColor(lobby),
       socketId: socket.id,
       connected: true,
@@ -386,10 +386,10 @@ io.on("connection", (socket) => {
   });
 
   socket.on("join_lobby", ({ playerId, roomCode, playerName } = {}, ack) => {
-    if (!playerId) { if (ack) ack({ ok: false, error: "מזהה חסר" }); return; }
+    if (!playerId) { if (ack) ack({ ok: false, error: "missing_id" }); return; }
     const code = (roomCode || "").toString().trim();
     const lobby = lobbies.get(code);
-    if (!lobby) { if (ack) ack({ ok: false, error: "החדר לא נמצא" }); return; }
+    if (!lobby) { if (ack) ack({ ok: false, error: "not_found" }); return; }
 
     // Returning player (same token) -> rebind instead of adding a duplicate.
     let player = lobby.players.get(playerId);
@@ -398,7 +398,7 @@ io.on("connection", (socket) => {
     } else {
       player = {
         id: playerId,
-        name: (playerName || "שחקן").slice(0, 16),
+        name: (playerName || "Player").slice(0, 16),
         color: chooseColor(lobby),
         socketId: socket.id,
         connected: true,
@@ -420,7 +420,7 @@ io.on("connection", (socket) => {
     const code = (roomCode || "").toString().trim();
     const lobby = lobbies.get(code);
     const player = lobby && playerId ? lobby.players.get(playerId) : null;
-    if (!lobby || !player) { if (ack) ack({ ok: false, error: "החיבור פג" }); return; }
+    if (!lobby || !player) { if (ack) ack({ ok: false, error: "expired" }); return; }
     bindSocket(lobby, player, socket);
     socket.data.roomCode = code;
     socket.data.playerId = playerId;

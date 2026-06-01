@@ -1,4 +1,5 @@
 import { QRCodeSVG } from "qrcode.react";
+import { useI18n } from "../i18n.jsx";
 
 // Lobby: room code + QR to join, the player roster, the game-mode picker (host),
 // and the Start button.
@@ -13,15 +14,16 @@ export default function LobbyScreen({
   onStart,
   onLeave,
 }) {
+  const { t, rtl } = useI18n();
   const joinUrl = `${window.location.origin}/?room=${roomCode}`;
   const canStart = players.length >= 2;
   const mode = config?.mode || "one";
   const count = config?.count || 1;
 
   const MODES = [
-    { id: "one", label: "אחד", hint: "בחירת זוכה אחד" },
-    { id: "multiple", label: "כמה", hint: "בחירת כמה זוכים" },
-    { id: "groups", label: "קבוצות", hint: "חלוקה לקבוצות אקראיות" },
+    { id: "one", label: t("modeOne"), hint: t("hintOne") },
+    { id: "multiple", label: t("modeMultiple"), hint: t("hintMultiple") },
+    { id: "groups", label: t("modeGroups"), hint: t("hintGroups") },
   ];
 
   const setMode = (m) => {
@@ -36,19 +38,23 @@ export default function LobbyScreen({
     onSetMode(mode, next);
   };
 
+  // Last result line (winner names, or "{n} teams" for groups mode).
+  const last = history && history[0];
+  const lastLabel = last ? (last.teams ? t("nTeams", { n: last.teams }) : last.name) : "";
+
   return (
     <div className="screen">
       <div className="flex items-center justify-between">
         <button onClick={onLeave} className="text-white/40 text-sm py-2">
-          → יציאה
+          {rtl ? "→" : "←"} {t("leave")}
         </button>
         <span className="text-white/40 text-sm">
-          {players.length} {players.length === 1 ? "שחקן" : "שחקנים"}
+          {players.length} {players.length === 1 ? t("players_one") : t("players_other")}
         </span>
       </div>
 
       <div className="flex-1 flex flex-col items-center justify-center w-full max-w-sm mx-auto">
-        <p className="text-white/50 text-sm mb-1">קוד חדר</p>
+        <p className="text-white/50 text-sm mb-1">{t("roomCode")}</p>
         <div className="text-5xl font-mono font-extrabold tracking-[0.2em] mb-4">
           {roomCode}
         </div>
@@ -56,9 +62,7 @@ export default function LobbyScreen({
         <div className="bg-white p-3 rounded-2xl mb-3">
           <QRCodeSVG value={joinUrl} size={150} />
         </div>
-        <p className="text-white/40 text-xs mb-5 text-center">
-          סרקו את ה-QR, או הקלידו את קוד 4 הספרות
-        </p>
+        <p className="text-white/40 text-xs mb-5 text-center">{t("scanHint")}</p>
 
         {/* Mode picker */}
         <div className="w-full mb-4">
@@ -91,8 +95,8 @@ export default function LobbyScreen({
                 >
                   −
                 </button>
-                <span className="w-14 text-center font-bold">
-                  {count} {mode === "groups" ? "קבוצות" : "זוכים"}
+                <span className="min-w-[3.5rem] text-center font-bold">
+                  {count} {mode === "groups" ? t("unitTeams") : t("unitWinners")}
                 </span>
                 <button
                   onClick={() => bump(1)}
@@ -119,20 +123,20 @@ export default function LobbyScreen({
               />
               <span className="font-medium flex-1 truncate">
                 {p.name}
-                {me && p.id === me.id && <span className="text-white/40"> (אתה)</span>}
-                {p.connected === false && <span className="text-white/30 text-xs"> · מנותק</span>}
+                {me && p.id === me.id && <span className="text-white/40"> {t("you")}</span>}
+                {p.connected === false && <span className="text-white/30 text-xs"> {t("away")}</span>}
               </span>
               {p.isHost && (
-                <span className="text-xs bg-white/10 rounded-full px-2 py-0.5">מארח</span>
+                <span className="text-xs bg-white/10 rounded-full px-2 py-0.5">{t("host")}</span>
               )}
             </div>
           ))}
         </div>
       </div>
 
-      {history && history.length > 0 && (
+      {last && (
         <div className="w-full max-w-sm mx-auto mb-4 text-center text-white/40 text-xs">
-          נבחר לאחרונה: {history[0].name}
+          {t("lastChosen", { x: lastLabel })}
         </div>
       )}
 
@@ -142,11 +146,11 @@ export default function LobbyScreen({
           disabled={!canStart}
           className="w-full max-w-sm mx-auto py-4 rounded-2xl bg-red-500 active:bg-red-600 disabled:opacity-40 font-bold text-lg transition"
         >
-          {canStart ? "התחל" : "צריך 2+ שחקנים"}
+          {canStart ? t("start") : t("needPlayers")}
         </button>
       ) : (
         <p className="w-full max-w-sm mx-auto py-4 text-center text-white/50">
-          ממתינים שהמארח יתחיל…
+          {t("waitingHost")}
         </p>
       )}
     </div>

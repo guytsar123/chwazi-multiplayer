@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { socket, getPlayerId, syncClock } from "./socket";
+import { useI18n } from "./i18n.jsx";
 import { useWakeLock } from "./useWakeLock";
 import HomeScreen from "./screens/HomeScreen.jsx";
 import LobbyScreen from "./screens/LobbyScreen.jsx";
@@ -9,6 +10,7 @@ import ArenaScreen from "./screens/ArenaScreen.jsx";
 const PLAYER_ID = getPlayerId();
 
 export default function App() {
+  const { t } = useI18n();
   // screen: "home" | "lobby" | "countdown" | "arena"
   const [screen, setScreen] = useState("home");
   const [connected, setConnected] = useState(socket.connected);
@@ -32,6 +34,9 @@ export default function App() {
 
   // Mirror room/me for the reconnect handler (avoids stale closures).
   const sessionRef = useRef({ roomCode: "", joined: false });
+  // Latest t() for use inside the socket effect without re-subscribing on lang change.
+  const tRef = useRef(t);
+  tRef.current = t;
 
   const isHost = me && hostId && me.id === hostId;
   const sessionActive = ["lobby", "countdown", "arena"].includes(screen);
@@ -127,7 +132,7 @@ export default function App() {
     };
     const onHostChanged = ({ hostId }) => setHostId(hostId);
     const onLobbyClosed = ({ reason }) => {
-      setError(reason === "expired" ? "החדר נסגר עקב חוסר פעילות." : "החדר נסגר.");
+      setError(reason === "expired" ? tRef.current("lobbyExpired") : tRef.current("lobbyClosed"));
       resetToHome();
     };
 
@@ -200,11 +205,11 @@ export default function App() {
       "create_lobby",
       { playerId: PLAYER_ID, hostName, mode: "one", count: 1 },
       (res) => {
-        if (!res?.ok) return setError(res?.error || "לא ניתן ליצור חדר");
+        if (!res?.ok) return setError(t("createFail"));
         applySnapshot(res.snapshot);
       }
     );
-  }, [applySnapshot]);
+  }, [applySnapshot, t]);
 
   const joinLobby = useCallback((code, playerName) => {
     setError("");
@@ -212,11 +217,11 @@ export default function App() {
       "join_lobby",
       { playerId: PLAYER_ID, roomCode: code, playerName },
       (res) => {
-        if (!res?.ok) return setError(res?.error || "לא ניתן להצטרף לחדר");
+        if (!res?.ok) return setError(t("joinFail"));
         applySnapshot(res.snapshot);
       }
     );
-  }, [applySnapshot]);
+  }, [applySnapshot, t]);
 
   const setMode = useCallback((mode, count) => socket.emit("set_mode", { mode, count }), []);
   const startRound = useCallback(() => socket.emit("start_round"), []);
@@ -235,7 +240,7 @@ export default function App() {
     <div className="no-select h-full">
       {!connected && screen !== "home" && (
         <div className="fixed top-0 inset-x-0 z-50 bg-amber-600 text-center text-sm py-1">
-          מתחבר מחדש…
+          {t("reconnecting")}
         </div>
       )}
 

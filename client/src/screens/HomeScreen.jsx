@@ -1,9 +1,11 @@
 import { useState, useEffect } from "react";
+import { useI18n, LANGS } from "../i18n.jsx";
 
 // The server assigns every player a random, unique color automatically — there
-// is no avatar or color to choose. The home screen just collects a name (and a
-// room code when joining).
+// is no avatar or color to choose. The home screen collects a name (and a room
+// code when joining), and lets you pick the language.
 export default function HomeScreen({ onCreate, onJoin, error, connected }) {
+  const { t, lang, setLang, rtl } = useI18n();
   const [mode, setMode] = useState(null); // null | "create" | "join"
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
@@ -30,10 +32,27 @@ export default function HomeScreen({ onCreate, onJoin, error, connected }) {
 
   return (
     <div className="screen items-center justify-center text-center">
+      {/* Language switcher */}
+      <div className="w-full flex justify-center gap-1.5 flex-wrap">
+        {LANGS.map((l) => (
+          <button
+            key={l.id}
+            onClick={() => setLang(l.id)}
+            className={`px-3 py-1.5 rounded-full text-sm transition ${
+              lang === l.id
+                ? "bg-white/20 text-white font-semibold"
+                : "bg-white/5 text-white/60 active:bg-white/15"
+            }`}
+          >
+            {l.label}
+          </button>
+        ))}
+      </div>
+
       <div className="flex-1 flex flex-col items-center justify-center w-full max-w-sm">
         <div className="text-7xl mb-2 animate-float">👆</div>
         <h1 className="text-4xl font-extrabold tracking-tight">choose-me</h1>
-        <p className="text-white/50 mb-8">בוחר אקראי מרובה משתתפים</p>
+        <p className="text-white/50 mb-8">{t("subtitle")}</p>
 
         {!mode && (
           <div className="w-full space-y-3">
@@ -41,13 +60,13 @@ export default function HomeScreen({ onCreate, onJoin, error, connected }) {
               onClick={() => setMode("create")}
               className="w-full py-4 rounded-2xl bg-red-500 active:bg-red-600 font-bold text-lg transition"
             >
-              יצירת חדר
+              {t("createRoom")}
             </button>
             <button
               onClick={() => setMode("join")}
               className="w-full py-4 rounded-2xl bg-white/10 active:bg-white/20 font-bold text-lg transition"
             >
-              הצטרפות לחדר
+              {t("joinRoom")}
             </button>
           </div>
         )}
@@ -59,7 +78,7 @@ export default function HomeScreen({ onCreate, onJoin, error, connected }) {
               value={name}
               maxLength={16}
               onChange={(e) => setName(e.target.value)}
-              placeholder="השם שלך"
+              placeholder={t("yourName")}
               className="w-full py-4 px-4 rounded-2xl bg-white/10 text-center text-lg outline-none focus:ring-2 ring-red-500"
             />
 
@@ -75,26 +94,26 @@ export default function HomeScreen({ onCreate, onJoin, error, connected }) {
               />
             )}
 
-            <p className="text-white/40 text-xs">צבע אקראי ייבחר לך אוטומטית 🎨</p>
+            <p className="text-white/40 text-xs">{t("randomColorNote")}</p>
 
             <button
               onClick={submit}
               disabled={!canSubmit || !connected}
               className="w-full py-4 rounded-2xl bg-red-500 active:bg-red-600 disabled:opacity-40 font-bold text-lg transition"
             >
-              {mode === "create" ? "צור" : "הצטרף"}
+              {mode === "create" ? t("create") : t("join")}
             </button>
             <button
               onClick={() => setMode(null)}
               className="w-full py-2 text-white/40 text-sm"
             >
-              → חזרה
+              {rtl ? "→" : "←"} {t("back")}
             </button>
           </div>
         )}
 
         {error && <p className="mt-4 text-red-400 text-sm">{error}</p>}
-        {!connected && <p className="mt-4 text-amber-400 text-sm">מתחבר לשרת…</p>}
+        {!connected && <p className="mt-4 text-amber-400 text-sm">{t("connecting")}</p>}
       </div>
     </div>
   );
