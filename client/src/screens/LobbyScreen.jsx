@@ -1,9 +1,7 @@
-import { useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
-import { SOUND_PACKS, getPack, previewPack } from "../audio";
 
 // Lobby: room code + QR to join, the player roster, the game-mode picker (host),
-// a per-device sound picker, and the Start button.
+// and the Start button.
 export default function LobbyScreen({
   roomCode,
   players,
@@ -19,13 +17,6 @@ export default function LobbyScreen({
   const canStart = players.length >= 2;
   const mode = config?.mode || "one";
   const count = config?.count || 1;
-
-  // Sound pack is a per-device choice; tapping previews it (and selects it).
-  const [sound, setSound] = useState(getPack());
-  const chooseSound = (id) => {
-    setSound(id);
-    previewPack(id);
-  };
 
   const MODES = [
     { id: "one", label: "אחד", hint: "בחירת זוכה אחד" },
@@ -112,27 +103,6 @@ export default function LobbyScreen({
                 </button>
               </div>
             )}
-          </div>
-        </div>
-
-        {/* Sound picker (per device) — tap to hear and choose */}
-        <div className="w-full mb-4">
-          <span className="text-white/50 text-xs">צלילים — הקישו כדי לשמוע</span>
-          <div className="flex flex-wrap gap-2 mt-1.5">
-            {SOUND_PACKS.map((s) => (
-              <button
-                key={s.id}
-                onClick={() => chooseSound(s.id)}
-                className={`px-3 py-2 rounded-xl text-sm font-semibold transition ${
-                  sound === s.id
-                    ? "bg-red-500 text-white"
-                    : "bg-white/5 text-white/70 active:bg-white/15"
-                }`}
-              >
-                {sound === s.id ? "🔊 " : ""}
-                {s.label}
-              </button>
-            ))}
           </div>
         </div>
 

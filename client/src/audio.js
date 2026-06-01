@@ -29,17 +29,12 @@ const PACKS = {
 };
 export const SOUND_PACKS = Object.entries(PACKS).map(([id, p]) => ({ id, label: p.label }));
 
-let packId = (typeof localStorage !== "undefined" && localStorage.getItem("chwazi_sound")) || "warm";
-if (!PACKS[packId]) packId = "warm";
+// Everyone uses the "warm" pack by default (no in-app picker). The other packs
+// remain available in code for future use / quick changes.
+let packId = "warm";
 export const getPack = () => packId;
 export function setPack(id) {
-  if (!PACKS[id]) return;
-  packId = id;
-  try {
-    localStorage.setItem("chwazi_sound", id);
-  } catch {
-    /* ignore */
-  }
+  if (PACKS[id]) packId = id;
 }
 const curPack = () => PACKS[packId];
 
