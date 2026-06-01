@@ -19,9 +19,9 @@ export default function LobbyScreen({
   const count = config?.count || 1;
 
   const MODES = [
-    { id: "one", label: "One", hint: "Pick a single winner" },
-    { id: "multiple", label: "Multiple", hint: "Pick several winners" },
-    { id: "groups", label: "Teams", hint: "Split into random teams" },
+    { id: "one", label: "אחד", hint: "בחירת זוכה אחד" },
+    { id: "multiple", label: "כמה", hint: "בחירת כמה זוכים" },
+    { id: "groups", label: "קבוצות", hint: "חלוקה לקבוצות אקראיות" },
   ];
 
   const setMode = (m) => {
@@ -40,15 +40,15 @@ export default function LobbyScreen({
     <div className="screen">
       <div className="flex items-center justify-between">
         <button onClick={onLeave} className="text-white/40 text-sm py-2">
-          ← Leave
+          → יציאה
         </button>
         <span className="text-white/40 text-sm">
-          {players.length} {players.length === 1 ? "player" : "players"}
+          {players.length} {players.length === 1 ? "שחקן" : "שחקנים"}
         </span>
       </div>
 
       <div className="flex-1 flex flex-col items-center justify-center w-full max-w-sm mx-auto">
-        <p className="text-white/50 text-sm mb-1">Room code</p>
+        <p className="text-white/50 text-sm mb-1">קוד חדר</p>
         <div className="text-5xl font-mono font-extrabold tracking-[0.2em] mb-4">
           {roomCode}
         </div>
@@ -57,7 +57,7 @@ export default function LobbyScreen({
           <QRCodeSVG value={joinUrl} size={150} />
         </div>
         <p className="text-white/40 text-xs mb-5 text-center">
-          Scan the QR, or type the 4-digit code
+          סרקו את ה-QR, או הקלידו את קוד 4 הספרות
         </p>
 
         {/* Mode picker */}
@@ -91,8 +91,8 @@ export default function LobbyScreen({
                 >
                   −
                 </button>
-                <span className="w-10 text-center font-bold">
-                  {count} {mode === "groups" ? "teams" : "win"}
+                <span className="w-14 text-center font-bold">
+                  {count} {mode === "groups" ? "קבוצות" : "זוכים"}
                 </span>
                 <button
                   onClick={() => bump(1)}
@@ -111,16 +111,16 @@ export default function LobbyScreen({
             <div
               key={p.id}
               className="flex items-center gap-3 bg-white/5 rounded-xl px-4 py-3"
-              style={{ borderLeft: `4px solid ${p.color}`, opacity: p.connected === false ? 0.45 : 1 }}
+              style={{ borderInlineStart: `4px solid ${p.color}`, opacity: p.connected === false ? 0.45 : 1 }}
             >
               <span className="text-2xl">{p.emoji}</span>
               <span className="font-medium flex-1 truncate">
                 {p.name}
-                {me && p.id === me.id && <span className="text-white/40"> (you)</span>}
-                {p.connected === false && <span className="text-white/30 text-xs"> · away</span>}
+                {me && p.id === me.id && <span className="text-white/40"> (אתה)</span>}
+                {p.connected === false && <span className="text-white/30 text-xs"> · מנותק</span>}
               </span>
               {p.isHost && (
-                <span className="text-xs bg-white/10 rounded-full px-2 py-0.5">host</span>
+                <span className="text-xs bg-white/10 rounded-full px-2 py-0.5">מארח</span>
               )}
             </div>
           ))}
@@ -129,7 +129,7 @@ export default function LobbyScreen({
 
       {history && history.length > 0 && (
         <div className="w-full max-w-sm mx-auto mb-4 text-center text-white/40 text-xs">
-          Last chosen: {history[0].name}
+          נבחר לאחרונה: {history[0].name}
         </div>
       )}
 
@@ -139,11 +139,11 @@ export default function LobbyScreen({
           disabled={!canStart}
           className="w-full max-w-sm mx-auto py-4 rounded-2xl bg-red-500 active:bg-red-600 disabled:opacity-40 font-bold text-lg transition"
         >
-          {canStart ? "Start" : "Need 2+ players"}
+          {canStart ? "התחל" : "צריך 2+ שחקנים"}
         </button>
       ) : (
         <p className="w-full max-w-sm mx-auto py-4 text-center text-white/50">
-          Waiting for the host to start…
+          ממתינים שהמארח יתחיל…
         </p>
       )}
     </div>

@@ -127,7 +127,7 @@ export default function App() {
     };
     const onHostChanged = ({ hostId }) => setHostId(hostId);
     const onLobbyClosed = ({ reason }) => {
-      setError(reason === "expired" ? "Lobby expired due to inactivity." : "The lobby was closed.");
+      setError(reason === "expired" ? "החדר נסגר עקב חוסר פעילות." : "החדר נסגר.");
       resetToHome();
     };
 
@@ -200,7 +200,7 @@ export default function App() {
       "create_lobby",
       { playerId: PLAYER_ID, hostName, emoji, color, mode: "one", count: 1 },
       (res) => {
-        if (!res?.ok) return setError(res?.error || "Could not create lobby");
+        if (!res?.ok) return setError(res?.error || "לא ניתן ליצור חדר");
         applySnapshot(res.snapshot);
       }
     );
@@ -212,7 +212,7 @@ export default function App() {
       "join_lobby",
       { playerId: PLAYER_ID, roomCode: code, playerName, emoji, color },
       (res) => {
-        if (!res?.ok) return setError(res?.error || "Could not join lobby");
+        if (!res?.ok) return setError(res?.error || "לא ניתן להצטרף לחדר");
         applySnapshot(res.snapshot);
       }
     );
@@ -235,7 +235,7 @@ export default function App() {
     <div className="no-select h-full">
       {!connected && screen !== "home" && (
         <div className="fixed top-0 inset-x-0 z-50 bg-amber-600 text-center text-sm py-1">
-          Reconnecting…
+          מתחבר מחדש…
         </div>
       )}
 

@@ -517,12 +517,12 @@ export default function ArenaScreen({
   const headline = !result
     ? null
     : result.mode === "groups"
-    ? `${result.count} teams!`
+    ? `${result.count} קבוצות!`
     : result.mode === "multiple"
-    ? `${(result.winners || []).map((wv) => wv.name).join(", ")} chosen!`
+    ? `${(result.winners || []).map((wv) => wv.name).join(", ")} נבחרו!`
     : amWinner
-    ? "It's you! 🎉"
-    : `${result.winners[0].name} is chosen`;
+    ? "זה אתה! 🎉"
+    : `${result.winners[0].name} נבחר`;
 
   return (
     <div className="relative h-full w-full overflow-hidden" style={{ background: BG }}>
@@ -540,7 +540,7 @@ export default function ArenaScreen({
       <button
         onClick={toggleMute}
         className="absolute top-[max(0.75rem,env(safe-area-inset-top))] right-3 z-10 w-10 h-10 rounded-full bg-white/10 active:bg-white/20 text-lg flex items-center justify-center"
-        aria-label={muted ? "Unmute" : "Mute"}
+        aria-label={muted ? "בטל השתקה" : "השתק"}
       >
         {muted ? "🔇" : "🔊"}
       </button>
@@ -550,13 +550,13 @@ export default function ArenaScreen({
         {result ? (
           <p className="text-white text-xl font-bold drop-shadow">{headline}</p>
         ) : suspense ? (
-          <p className="text-white/95 text-xl font-bold">Choosing…</p>
+          <p className="text-white/95 text-xl font-bold">בוחר…</p>
         ) : (
           <>
             <p className="text-white/85 text-lg font-medium">
-              {ready.readyCount} / {ready.totalCount} holding
+              {ready.readyCount} / {ready.totalCount} מחזיקים
             </p>
-            <p className="text-white/40 text-sm">Hold your circle • drag it around</p>
+            <p className="text-white/40 text-sm">החזיקו את העיגול • גררו אותו</p>
           </>
         )}
       </div>
@@ -570,18 +570,18 @@ export default function ArenaScreen({
                 onClick={onPlayAgain}
                 className="w-full py-4 rounded-2xl bg-white text-black active:bg-white/80 font-bold text-lg transition"
               >
-                Play again
+                שחק שוב
               </button>
             ) : (
-              <p className="text-center text-white/70">Waiting for host to play again…</p>
+              <p className="text-center text-white/70">ממתינים שהמארח יתחיל סיבוב חדש…</p>
             )}
             <button onClick={onLeave} className="w-full py-2 text-white/50 text-sm">
-              Leave
+              יציאה
             </button>
           </div>
         ) : (
           <p className="pointer-events-none text-center text-white/50 text-sm">
-            {meReady ? "Holding — don't let go ✋" : "Hold your circle to join in"}
+            {meReady ? "מחזיק — אל תעזוב ✋" : "החזיקו את העיגול כדי להצטרף"}
           </p>
         )}
       </div>

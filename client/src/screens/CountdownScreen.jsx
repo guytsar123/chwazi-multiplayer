@@ -6,7 +6,7 @@ export default function CountdownScreen({ countdown, me }) {
   return (
     <div className="screen items-center justify-center">
       <div className="flex-1 flex flex-col items-center justify-center">
-        <p className="text-white/50 mb-4">Get ready…</p>
+        <p className="text-white/50 mb-4">להתכונן…</p>
         <div
           key={countdown}
           className="text-[10rem] leading-none font-extrabold animate-count-bounce"
@@ -26,7 +26,7 @@ export default function CountdownScreen({ countdown, me }) {
           <span className="font-medium" style={{ color: me.color }}>
             {me.name}
           </span>
-          <span className="text-white/40 text-sm">(you)</span>
+          <span className="text-white/40 text-sm">(אתה)</span>
         </div>
       )}
     </div>

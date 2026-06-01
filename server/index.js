@@ -316,7 +316,7 @@ function resolveRound(lobby) {
       );
     });
     result = { mode: "groups", count: groupCount, groups: assignment };
-    lobby.history.unshift({ name: `${groupCount} teams`, at: Date.now() });
+    lobby.history.unshift({ name: `${groupCount} קבוצות`, at: Date.now() });
   } else {
     const n = lobby.mode === "multiple" ? Math.max(1, Math.min(lobby.count, pool.length)) : 1;
     const winnerIds = cryptoShuffle(pool).slice(0, n);
@@ -356,7 +356,7 @@ io.on("connection", (socket) => {
   });
 
   socket.on("create_lobby", ({ playerId, hostName, emoji, color, mode, count } = {}, ack) => {
-    if (!playerId) { if (ack) ack({ ok: false, error: "Missing id" }); return; }
+    if (!playerId) { if (ack) ack({ ok: false, error: "מזהה חסר" }); return; }
     const roomCode = genCode();
     const lobby = {
       roomCode,
@@ -374,7 +374,7 @@ io.on("connection", (socket) => {
     };
     const player = {
       id: playerId,
-      name: (hostName || "Host").slice(0, 16),
+      name: (hostName || "מארח").slice(0, 16),
       emoji: chooseEmoji(lobby, emoji),
       color: chooseColor(lobby, color),
       socketId: socket.id,
@@ -393,10 +393,10 @@ io.on("connection", (socket) => {
   });
 
   socket.on("join_lobby", ({ playerId, roomCode, playerName, emoji, color } = {}, ack) => {
-    if (!playerId) { if (ack) ack({ ok: false, error: "Missing id" }); return; }
+    if (!playerId) { if (ack) ack({ ok: false, error: "מזהה חסר" }); return; }
     const code = (roomCode || "").toString().trim();
     const lobby = lobbies.get(code);
-    if (!lobby) { if (ack) ack({ ok: false, error: "Lobby not found" }); return; }
+    if (!lobby) { if (ack) ack({ ok: false, error: "החדר לא נמצא" }); return; }
 
     // Returning player (same token) -> rebind instead of adding a duplicate.
     let player = lobby.players.get(playerId);
@@ -405,7 +405,7 @@ io.on("connection", (socket) => {
     } else {
       player = {
         id: playerId,
-        name: (playerName || "Player").slice(0, 16),
+        name: (playerName || "שחקן").slice(0, 16),
         emoji: chooseEmoji(lobby, emoji),
         color: chooseColor(lobby, color),
         socketId: socket.id,
@@ -428,7 +428,7 @@ io.on("connection", (socket) => {
     const code = (roomCode || "").toString().trim();
     const lobby = lobbies.get(code);
     const player = lobby && playerId ? lobby.players.get(playerId) : null;
-    if (!lobby || !player) { if (ack) ack({ ok: false, error: "Session expired" }); return; }
+    if (!lobby || !player) { if (ack) ack({ ok: false, error: "החיבור פג" }); return; }
     bindSocket(lobby, player, socket);
     socket.data.roomCode = code;
     socket.data.playerId = playerId;
