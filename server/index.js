@@ -112,7 +112,22 @@ function publicPlayers(lobby) {
     emoji: p.emoji,
     color: p.color,
     isHost: p.id === lobby.hostId,
+    // Last known normalized position (0..1) so late-joiners/repaints are correct.
+    x: p.x ?? 0.5,
+    y: p.y ?? 0.5,
   }));
+}
+
+const clamp01 = (v) =>
+  typeof v === "number" && isFinite(v) ? Math.min(1, Math.max(0, v)) : null;
+
+// Spread newly-joined players around a circle (normalized) so they don't stack.
+function spawnPosition(lobby) {
+  const i = lobby.players.size; // index of the player about to be added
+  const total = i + 1;
+  const ang = -Math.PI / 2 + (i / Math.max(total, 1)) * Math.PI * 2;
+  const r = total === 1 ? 0 : 0.3;
+  return { x: 0.5 + Math.cos(ang) * r, y: 0.5 + Math.sin(ang) * r };
 }
 
 function broadcastPlayers(lobby) {
@@ -287,6 +302,7 @@ io.on("connection", (socket) => {
       name: (hostName || "Host").slice(0, 16),
       emoji: chooseEmoji(lobby, emoji),
       color: chooseColor(lobby, color),
+      ...spawnPosition(lobby),
     };
     lobby.players.set(socket.id, player);
     lobbies.set(roomCode, lobby);
@@ -310,6 +326,7 @@ io.on("connection", (socket) => {
       name: (playerName || "Player").slice(0, 16),
       emoji: chooseEmoji(lobby, emoji),
       color: chooseColor(lobby, color),
+      ...spawnPosition(lobby),
     };
     lobby.players.set(socket.id, player);
     socket.data.roomCode = code;
@@ -333,6 +350,27 @@ io.on("connection", (socket) => {
     if (socket.id !== lobby.hostId) return; // host only
     if (lobby.state !== "waiting" && lobby.state !== "result") return;
     startRound(lobby);
+  });
+
+  // Live drag: each client streams its own puck's normalized position; we store
+  // it (for late-joiners) and rebroadcast to everyone else. volatile = drop under
+  // backpressure since the next update corrects it ~50ms later.
+  socket.on("move", (pos) => {
+    const lobby = getLobby();
+    if (!lobby) return;
+    const p = lobby.players.get(socket.id);
+    if (!p) return;
+    const nx = clamp01(pos?.x);
+    const ny = clamp01(pos?.y);
+    if (nx == null || ny == null) return;
+    p.x = nx;
+    p.y = ny;
+    touch(lobby);
+    socket.to(lobby.roomCode).volatile.emit("player_moved", {
+      id: socket.id,
+      x: nx,
+      y: ny,
+    });
   });
 
   socket.on("player_ready", () => {

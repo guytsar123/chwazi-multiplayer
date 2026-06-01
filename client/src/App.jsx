@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { socket } from "./socket";
 import { useWakeLock } from "./useWakeLock";
 import HomeScreen from "./screens/HomeScreen.jsx";
@@ -26,6 +26,11 @@ export default function App() {
   const [result, setResult] = useState(null); // { chosenPlayerId, ... } | null
   const [history, setHistory] = useState([]);
 
+  // Live puck positions, kept in a ref (NOT state) so 20Hz network updates never
+  // re-render React — the canvas rAF loop reads this directly.
+  // posRef.current = Map<playerId, { tx, ty }>  (normalized target positions)
+  const posRef = useRef(new Map());
+
   const isHost = me && hostId && me.id === hostId;
   const sessionActive = ["lobby", "countdown", "arena"].includes(screen);
   useWakeLock(sessionActive);
@@ -42,6 +47,17 @@ export default function App() {
     const onLobbyUpdate = ({ players, hostId }) => {
       setPlayers(players);
       setHostId(hostId);
+      // Seed/refresh target positions for any player we don't track yet, from the
+      // server snapshot (handles late-joiners and reconnects).
+      const m = posRef.current;
+      const live = new Set();
+      for (const p of players) {
+        live.add(p.id);
+        if (!m.has(p.id)) {
+          m.set(p.id, { tx: p.x ?? 0.5, ty: p.y ?? 0.5 });
+        }
+      }
+      for (const id of [...m.keys()]) if (!live.has(id)) m.delete(id);
     };
 
     const onRoundStarted = ({ countdown }) => {
@@ -59,6 +75,17 @@ export default function App() {
       setScreen("arena");
     };
     const onReadyUpdate = (payload) => setReady(payload);
+    const onPlayerMoved = ({ id, x, y }) => {
+      if (id === socket.id) return; // my own echo — I render locally (prediction)
+      const m = posRef.current;
+      const cur = m.get(id);
+      if (cur) {
+        cur.tx = x;
+        cur.ty = y;
+      } else {
+        m.set(id, { tx: x, ty: y });
+      }
+    };
     const onSuspenseStarted = ({ durationMs }) => {
       setSuspense({ startedAt: Date.now(), durationMs });
     };
@@ -93,6 +120,7 @@ export default function App() {
     socket.on("countdown_tick", onCountdownTick);
     socket.on("selection_started", onSelectionStarted);
     socket.on("ready_update", onReadyUpdate);
+    socket.on("player_moved", onPlayerMoved);
     socket.on("suspense_started", onSuspenseStarted);
     socket.on("suspense_cancelled", onSuspenseCancelled);
     socket.on("round_result", onRoundResult);
@@ -108,6 +136,7 @@ export default function App() {
       socket.off("countdown_tick", onCountdownTick);
       socket.off("selection_started", onSelectionStarted);
       socket.off("ready_update", onReadyUpdate);
+      socket.off("player_moved", onPlayerMoved);
       socket.off("suspense_started", onSuspenseStarted);
       socket.off("suspense_cancelled", onSuspenseCancelled);
       socket.off("round_result", onRoundResult);
@@ -163,6 +192,8 @@ export default function App() {
 
   const startRound = useCallback(() => socket.emit("start_round"), []);
   const playAgain = useCallback(() => socket.emit("play_again"), []);
+  // Throttled in ArenaScreen; here we just forward to the server.
+  const sendMove = useCallback((x, y) => socket.emit("move", { x, y }), []);
   const setReadyState = useCallback((isReady) => {
     socket.emit(isReady ? "player_ready" : "player_unready");
   }, []);
@@ -214,7 +245,9 @@ export default function App() {
           result={result}
           isHost={isHost}
           history={history}
+          positions={posRef}
           onReadyChange={setReadyState}
+          onMove={sendMove}
           onPlayAgain={playAgain}
           onLeave={leaveLobby}
         />
