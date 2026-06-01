@@ -99,6 +99,29 @@ export default function ArenaScreen({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready.readyIds, result]);
 
+  // ---- continuous haptic while you hold your color, until the pick ----------
+  // Buzzes from the moment you're holding your circle until the reveal, getting
+  // stronger/faster during the final "choosing" suspense. (Android only — iOS
+  // Safari has no Web Vibration API.) Declared BEFORE the reveal effect so the
+  // reveal's vibrate(200) fires last on the result frame and isn't cancelled.
+  useEffect(() => {
+    if (typeof navigator === "undefined" || !navigator.vibrate) return;
+    const holding = me && (ready.readyIds || []).includes(me.id);
+    if (!holding || result) {
+      navigator.vibrate(0); // stop any ongoing buzz
+      return;
+    }
+    const strong = !!suspense;
+    const dur = strong ? 300 : 200; // pulse length (ms)
+    const tick = strong ? 340 : 320; // ~continuous; faster/longer in suspense
+    navigator.vibrate(dur);
+    const id = setInterval(() => navigator.vibrate(dur), tick);
+    return () => {
+      clearInterval(id);
+      navigator.vibrate(0);
+    };
+  }, [me, ready.readyIds, suspense, result]);
+
   // ---- result: chime + confetti + stop the hum -----------------------------
   useEffect(() => {
     if (result) {
