@@ -44,7 +44,7 @@ const io = new Server(httpServer, {
  */
 const lobbies = new Map();
 
-const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no easily-confused chars
+const CODE_CHARS = "0123456789"; // digits only — easier to type/share
 const COLORS = [
   "#ef4444", "#f97316", "#f59e0b", "#eab308", "#84cc16",
   "#22c55e", "#10b981", "#14b8a6", "#06b6d4", "#3b82f6",
@@ -56,7 +56,7 @@ function genCode() {
   let code;
   do {
     code = "";
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 4; i++) {
       code += CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)];
     }
   } while (lobbies.has(code));

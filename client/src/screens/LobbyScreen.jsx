@@ -35,7 +35,7 @@ export default function LobbyScreen({
           <QRCodeSVG value={joinUrl} size={160} />
         </div>
         <p className="text-white/40 text-xs mb-8 text-center">
-          Scan to join, or enter the code on chwazi
+          Scan the QR, or type the 4-digit code
         </p>
 
         <div className="w-full grid grid-cols-1 gap-2">

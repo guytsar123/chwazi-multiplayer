@@ -27,20 +27,20 @@ export default function HomeScreen({ onCreate, onJoin, error, connected }) {
     const params = new URLSearchParams(window.location.search);
     const room = params.get("room");
     if (room) {
-      setCode(room.toUpperCase().slice(0, 6));
+      setCode(room.replace(/\D/g, "").slice(0, 4));
       setMode("join");
     }
   }, []);
 
   const canSubmit =
     name.trim().length > 0 &&
-    (mode === "create" || (mode === "join" && code.trim().length === 6));
+    (mode === "create" || (mode === "join" && code.trim().length === 4));
 
   const submit = () => {
     if (!canSubmit) return;
     // emoji/color may be null → server auto-assigns.
     if (mode === "create") onCreate(name.trim(), emoji, color);
-    else onJoin(code.trim().toUpperCase(), name.trim(), emoji, color);
+    else onJoin(code.trim(), name.trim(), emoji, color);
   };
 
   const previewColor = color || "#3b82f6";
@@ -102,12 +102,14 @@ export default function HomeScreen({ onCreate, onJoin, error, connected }) {
             {mode === "join" && (
               <input
                 value={code}
-                maxLength={6}
+                inputMode="numeric"
+                pattern="[0-9]*"
+                maxLength={4}
                 onChange={(e) =>
-                  setCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ""))
+                  setCode(e.target.value.replace(/\D/g, "").slice(0, 4))
                 }
-                placeholder="ROOM CODE"
-                className="w-full py-4 px-4 rounded-2xl bg-white/10 text-center text-2xl font-mono tracking-[0.3em] outline-none focus:ring-2 ring-red-500"
+                placeholder="0000"
+                className="w-full py-4 px-4 rounded-2xl bg-white/10 text-center text-3xl font-mono tracking-[0.4em] outline-none focus:ring-2 ring-red-500"
               />
             )}
 

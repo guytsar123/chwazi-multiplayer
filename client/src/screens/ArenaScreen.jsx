@@ -18,13 +18,24 @@ const LOSER_FADE_MS = 280; // losers shrink + fade
 const SEND_MS = 50; // ~20Hz position send
 const MOVE_EPS = 0.003; // min normalized move before we send
 const LERP = 0.25; // remote puck smoothing per frame
-const HOLD_MOVE_TOL = 0.02; // drag farther than this = a move, not just a "hold"
-const TRAIL_MS = 380;
-const TRAIL_MAX = 22;
-const TRAIL_MIN_DIST = 0.004; // normalized
+// Smoke-puff trail: dense overlapping blobs that expand & fade, drawn additively
+// for crisp, vivid color near the puck.
+const TRAIL_MS = 620; // a puff lives this long
+const TRAIL_MAX = 34; // max puffs kept per puck
+const TRAIL_MIN_DIST = 0.0016; // emit a new puff after this much movement (dense)
 
 function easeOutCubic(t) {
   return 1 - Math.pow(1 - t, 3);
+}
+
+// "#rrggbb" + alpha (0..1) -> "rgba(r,g,b,a)" for gradient stops.
+function hexA(hex, a) {
+  let h = hex.replace("#", "");
+  if (h.length === 3) h = h.split("").map((c) => c + c).join("");
+  const r = parseInt(h.slice(0, 2), 16);
+  const g = parseInt(h.slice(2, 4), 16);
+  const b = parseInt(h.slice(4, 6), 16);
+  return `rgba(${r},${g},${b},${a})`;
 }
 
 export default function ArenaScreen({
@@ -57,7 +68,6 @@ export default function ArenaScreen({
   // Drag + hold tracking.
   const dragRef = useRef({ active: false, pointerId: null, offX: 0, offY: 0 });
   const holdRef = useRef(false);
-  const downPtRef = useRef(null);
   const currentRRef = useRef(40); // last drawn puck radius (logical px)
 
   // Seed my position from the roster (e.g. after join/reconnect).
@@ -222,28 +232,37 @@ export default function ArenaScreen({
         );
       }
 
-      // ---- trails (under pucks) ------------------------------------------
+      // ---- smoke trails (under pucks) ------------------------------------
+      // Each trail point is rendered as a soft radial puff. Puffs grow as they
+      // age and fade out, and we composite with "lighter" so overlapping puffs
+      // of the same hue stay vivid/crisp rather than muddy — a thick, glowing
+      // smoke ribbon concentrated right behind the puck.
       if (!result) {
         ctx.save();
-        ctx.lineCap = "round";
-        ctx.lineJoin = "round";
+        ctx.globalCompositeOperation = "lighter";
         for (const p of ps) {
           const arr = trails.get(p.id);
-          if (!arr || arr.length < 2) continue;
-          ctx.strokeStyle = p.color;
-          for (let i = 1; i < arr.length; i++) {
-            const a = arr[i - 1];
-            const b = arr[i];
-            const age = now - a.t;
+          if (!arr || arr.length < 1) continue;
+          for (let i = 0; i < arr.length; i++) {
+            const pt = arr[i];
+            const age = now - pt.t;
             if (age > TRAIL_MS) continue;
-            const life = 1 - age / TRAIL_MS;
-            const headFrac = i / arr.length;
-            ctx.globalAlpha = 0.5 * life;
-            ctx.lineWidth = R * (0.22 + 0.62 * headFrac * life);
+            const life = 1 - age / TRAIL_MS; // 1 fresh → 0 old
+            const headFrac = (i + 1) / arr.length; // newer = bigger/brighter
+            // Puff radius: starts compact near the puck, expands a bit as it ages.
+            const rad = R * (0.55 + (1 - life) * 0.9) * (0.5 + 0.5 * headFrac);
+            const px = pt.nx * w;
+            const py = pt.ny * h;
+            const g = ctx.createRadialGradient(px, py, 0, px, py, rad);
+            // Crisp saturated core, soft transparent edge.
+            const coreA = 0.42 * life * (0.45 + 0.55 * headFrac);
+            g.addColorStop(0, hexA(p.color, coreA));
+            g.addColorStop(0.55, hexA(p.color, coreA * 0.5));
+            g.addColorStop(1, hexA(p.color, 0));
+            ctx.fillStyle = g;
             ctx.beginPath();
-            ctx.moveTo(a.nx * w, a.ny * h);
-            ctx.lineTo(b.nx * w, b.ny * h);
-            ctx.stroke();
+            ctx.arc(px, py, rad, 0, Math.PI * 2);
+            ctx.fill();
           }
         }
         ctx.restore();
@@ -360,23 +379,22 @@ export default function ArenaScreen({
     const myx = my.x * w;
     const myy = my.y * h;
     const R = currentRRef.current;
-    const grab = R * 1.6;
-    const onMyPuck =
-      (pt.x - myx) ** 2 + (pt.y - myy) ** 2 <= grab * grab;
+    const grab = R * 1.5; // touch target around the puck
+    const onMyPuck = (pt.x - myx) ** 2 + (pt.y - myy) ** 2 <= grab * grab;
 
-    // Begin a hold (marks ready) regardless of where you press.
+    // Only the puck is interactive — touching empty space does nothing.
+    if (!onMyPuck) return;
+
+    // Press on the puck = hold (marks ready) + grab for dragging.
     if (!holdRef.current) {
       holdRef.current = true;
       onReadyChange(true);
       if (navigator.vibrate) navigator.vibrate(15);
     }
-    downPtRef.current = { x: my.x, y: my.y, grabbed: onMyPuck };
-
-    // Grab the puck for dragging if pressed on it (offset keeps it from jumping).
     dragRef.current = {
       active: true,
       pointerId: e.pointerId,
-      offX: my.x - pt.x / w,
+      offX: my.x - pt.x / w, // grab offset so the puck doesn't jump
       offY: my.y - pt.y / h,
     };
     try {
@@ -455,7 +473,7 @@ export default function ArenaScreen({
               {ready.readyCount} / {ready.totalCount} holding
             </p>
             <p className="text-white/40 text-sm">
-              Drag your circle • everyone hold to choose
+              Hold your circle • drag it around
             </p>
           </>
         )}
@@ -483,7 +501,7 @@ export default function ArenaScreen({
           </div>
         ) : (
           <p className="pointer-events-none text-center text-white/50 text-sm">
-            {meReady ? "Holding — don't let go ✋" : "Press & hold • drag to move"}
+            {meReady ? "Holding — don't let go ✋" : "Hold your circle to join in"}
           </p>
         )}
       </div>
