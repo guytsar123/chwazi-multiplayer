@@ -13,7 +13,7 @@ import {
 } from "../audio";
 
 // The shared live "stage", rebuilt to feel like the original Chwazi. Every player
-// is a Chwazi-style puck (white halo + colored disc + emoji) that gently breathes
+// is a Chwazi-style puck (white halo + colored disc) that gently breathes
 // and shows a rotating ring while waiting. You DRAG your own puck and HOLD it to
 // join the pick; positions stream to everyone (~20Hz, interpolated). When all are
 // holding, a synchronized suspense ring fills on every device (clock-synced to
@@ -237,7 +237,7 @@ export default function ArenaScreen({
         ctx.fillStyle = BG;
         ctx.fill();
         // winner puck sits in the dark disc
-        if (wp) drawPuck(ctx, wp, wx, wy, R, winners[0].color, 1, 1 + 0.05 * e, true, st);
+        if (wp) drawPuck(ctx, wp, wx, wy, R, winners[0].color, 1, 1 + 0.05 * e, true, true);
         raf = requestAnimationFrame(draw);
         return;
       }
@@ -339,7 +339,7 @@ export default function ArenaScreen({
         const r = R * scale;
         const isWin = winnerSet && winnerSet.has(p.id);
 
-        drawPuck(ctx, p, px, py, r / scale, col, alpha, scale, isWin, st);
+        drawPuck(ctx, p, px, py, r / scale, col, alpha, scale, isWin, !!result);
 
         // rings (only while playing)
         if (!result) {
@@ -385,9 +385,10 @@ export default function ArenaScreen({
     };
 
     // Puck drawing helper (kept inside effect to capture ctx conventions).
-    function drawPuck(ctx, p, px, py, baseR, color, alpha, scale, emphasized, st) {
+    function drawPuck(ctx, p, px, py, baseR, color, alpha, scale, emphasized, showName) {
       const r = baseR * scale;
       const me2 = stateRef.current.me;
+      const isMe = me2 && p.id === me2.id;
       ctx.save();
       ctx.globalAlpha = alpha;
       if (emphasized) {
@@ -405,16 +406,22 @@ export default function ArenaScreen({
       ctx.fillStyle = color;
       ctx.fill();
       ctx.shadowBlur = 0;
-      // emoji
-      ctx.font = `${Math.round(r * 1.05)}px system-ui, "Segoe UI Emoji", sans-serif`;
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText(p.emoji, px, py + r * 0.04);
-      // name
-      ctx.font = `600 ${Math.max(11, Math.round(r * 0.38))}px system-ui, sans-serif`;
-      ctx.fillStyle = "#fff";
-      const label = p.name + (me2 && p.id === me2.id ? " ·" : "");
-      ctx.fillText(label, px, py + r * 1.62);
+      // "you" marker: a small white dot in the center of your own puck, so you
+      // can find your circle without any name showing during the round.
+      if (isMe && !showName) {
+        ctx.beginPath();
+        ctx.arc(px, py, r * 0.2, 0, Math.PI * 2);
+        ctx.fillStyle = "rgba(255,255,255,0.95)";
+        ctx.fill();
+      }
+      // name — only at the final reveal, never during the round
+      if (showName) {
+        ctx.font = `700 ${Math.max(12, Math.round(r * 0.42))}px system-ui, sans-serif`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillStyle = "#fff";
+        ctx.fillText(p.name, px, py + r * 1.62);
+      }
       ctx.restore();
     }
 

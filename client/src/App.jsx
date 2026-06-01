@@ -15,7 +15,7 @@ export default function App() {
   const [error, setError] = useState("");
 
   const [roomCode, setRoomCode] = useState("");
-  const [me, setMe] = useState(null); // { id, name, emoji, color }
+  const [me, setMe] = useState(null); // { id, name, color }
   const [players, setPlayers] = useState([]);
   const [hostId, setHostId] = useState(null);
   const [config, setConfig] = useState({ mode: "one", count: 1 });
@@ -194,11 +194,11 @@ export default function App() {
   }, []);
 
   // ---- actions -------------------------------------------------------------
-  const createLobby = useCallback((hostName, emoji, color) => {
+  const createLobby = useCallback((hostName) => {
     setError("");
     socket.emit(
       "create_lobby",
-      { playerId: PLAYER_ID, hostName, emoji, color, mode: "one", count: 1 },
+      { playerId: PLAYER_ID, hostName, mode: "one", count: 1 },
       (res) => {
         if (!res?.ok) return setError(res?.error || "לא ניתן ליצור חדר");
         applySnapshot(res.snapshot);
@@ -206,11 +206,11 @@ export default function App() {
     );
   }, [applySnapshot]);
 
-  const joinLobby = useCallback((code, playerName, emoji, color) => {
+  const joinLobby = useCallback((code, playerName) => {
     setError("");
     socket.emit(
       "join_lobby",
-      { playerId: PLAYER_ID, roomCode: code, playerName, emoji, color },
+      { playerId: PLAYER_ID, roomCode: code, playerName },
       (res) => {
         if (!res?.ok) return setError(res?.error || "לא ניתן להצטרף לחדר");
         applySnapshot(res.snapshot);

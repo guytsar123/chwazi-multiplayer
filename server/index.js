@@ -69,8 +69,6 @@ const TEAM_COLORS = [
   "#ef5350", "#42a5f5", "#66bb6a", "#ffca28",
   "#ab47bc", "#26a69a", "#ff7043", "#ec407a",
 ];
-const EMOJIS = ["🦊", "🐼", "🐸", "🦄", "🐙", "🦁", "🐵", "🐯", "🐧", "🦉", "🐝", "🦋"];
-
 // crypto-grade Fisher-Yates shuffle (fair selection, untamperable).
 function cryptoShuffle(arr) {
   const a = [...arr];
@@ -104,14 +102,11 @@ function pickFrom(used, pool) {
   return src[randomInt(src.length)];
 }
 
-function chooseColor(lobby, wanted) {
-  if (typeof wanted === "string" && /^#[0-9a-fA-F]{6}$/.test(wanted)) return wanted;
+// Color is always auto-assigned at random from the pool, excluding colors already
+// taken in this lobby, so no two players ever share a color (until the pool runs
+// out). Any client-supplied color is ignored — selection is random-only.
+function chooseColor(lobby) {
   return pickFrom(new Set([...lobby.players.values()].map((p) => p.color)), COLORS);
-}
-
-function chooseEmoji(lobby, wanted) {
-  if (typeof wanted === "string" && wanted.length > 0 && wanted.length <= 8) return wanted;
-  return pickFrom(new Set([...lobby.players.values()].map((p) => p.emoji)), EMOJIS);
 }
 
 function clearTimers(lobby) {
@@ -141,7 +136,6 @@ function publicPlayers(lobby) {
   return [...lobby.players.values()].map((p) => ({
     id: p.id,
     name: p.name,
-    emoji: p.emoji,
     color: p.color,
     isHost: p.id === lobby.hostId,
     connected: p.connected,
@@ -301,7 +295,7 @@ function resolveRound(lobby) {
   const revealAt = serverNow + 120; // small lead so all clients start together
   const pub = (id) => {
     const p = lobby.players.get(id);
-    return { id: p.id, name: p.name, emoji: p.emoji, color: p.color };
+    return { id: p.id, name: p.name, color: p.color };
   };
 
   let result;
@@ -355,7 +349,7 @@ io.on("connection", (socket) => {
     if (ack) ack({ t0, serverNow: Date.now() });
   });
 
-  socket.on("create_lobby", ({ playerId, hostName, emoji, color, mode, count } = {}, ack) => {
+  socket.on("create_lobby", ({ playerId, hostName, mode, count } = {}, ack) => {
     if (!playerId) { if (ack) ack({ ok: false, error: "מזהה חסר" }); return; }
     const roomCode = genCode();
     const lobby = {
@@ -375,8 +369,7 @@ io.on("connection", (socket) => {
     const player = {
       id: playerId,
       name: (hostName || "מארח").slice(0, 16),
-      emoji: chooseEmoji(lobby, emoji),
-      color: chooseColor(lobby, color),
+      color: chooseColor(lobby),
       socketId: socket.id,
       connected: true,
       ...spawnPosition(lobby),
@@ -392,7 +385,7 @@ io.on("connection", (socket) => {
     broadcastPlayers(lobby);
   });
 
-  socket.on("join_lobby", ({ playerId, roomCode, playerName, emoji, color } = {}, ack) => {
+  socket.on("join_lobby", ({ playerId, roomCode, playerName } = {}, ack) => {
     if (!playerId) { if (ack) ack({ ok: false, error: "מזהה חסר" }); return; }
     const code = (roomCode || "").toString().trim();
     const lobby = lobbies.get(code);
@@ -406,8 +399,7 @@ io.on("connection", (socket) => {
       player = {
         id: playerId,
         name: (playerName || "שחקן").slice(0, 16),
-        emoji: chooseEmoji(lobby, emoji),
-        color: chooseColor(lobby, color),
+        color: chooseColor(lobby),
         socketId: socket.id,
         connected: true,
         ...spawnPosition(lobby),
