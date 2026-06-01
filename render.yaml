@@ -6,7 +6,7 @@
 #   New → Blueprint → pick this repo. Render reads this file automatically.
 services:
   - type: web
-    name: choose-me
+    name: chooseme
     runtime: node
     plan: free
     # Install both packages and build the client, then start the server.
