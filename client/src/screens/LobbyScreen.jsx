@@ -1,18 +1,40 @@
 import { QRCodeSVG } from "qrcode.react";
 
-// Lobby: shows the room code + QR for others to join, the player roster, and
-// (for the host) the Start button. Mirrors the server's lobby_update payload.
+// Lobby: room code + QR to join, the player roster, the game-mode picker (host),
+// and the Start button. Mirrors the server's lobby_update / snapshot payload.
 export default function LobbyScreen({
   roomCode,
   players,
   me,
   isHost,
   history,
+  config,
+  onSetMode,
   onStart,
   onLeave,
 }) {
   const joinUrl = `${window.location.origin}/?room=${roomCode}`;
   const canStart = players.length >= 2;
+  const mode = config?.mode || "one";
+  const count = config?.count || 1;
+
+  const MODES = [
+    { id: "one", label: "One", hint: "Pick a single winner" },
+    { id: "multiple", label: "Multiple", hint: "Pick several winners" },
+    { id: "groups", label: "Teams", hint: "Split into random teams" },
+  ];
+
+  const setMode = (m) => {
+    if (!isHost) return;
+    const def = m === "groups" ? 2 : m === "multiple" ? 2 : 1;
+    onSetMode(m, def);
+  };
+  const bump = (delta) => {
+    if (!isHost) return;
+    const lo = mode === "groups" ? 2 : 1;
+    const next = Math.min(8, Math.max(lo, count + delta));
+    onSetMode(mode, next);
+  };
 
   return (
     <div className="screen">
@@ -31,31 +53,74 @@ export default function LobbyScreen({
           {roomCode}
         </div>
 
-        <div className="bg-white p-3 rounded-2xl mb-6">
-          <QRCodeSVG value={joinUrl} size={160} />
+        <div className="bg-white p-3 rounded-2xl mb-3">
+          <QRCodeSVG value={joinUrl} size={150} />
         </div>
-        <p className="text-white/40 text-xs mb-8 text-center">
+        <p className="text-white/40 text-xs mb-5 text-center">
           Scan the QR, or type the 4-digit code
         </p>
+
+        {/* Mode picker */}
+        <div className="w-full mb-4">
+          <div className="grid grid-cols-3 gap-2">
+            {MODES.map((m) => (
+              <button
+                key={m.id}
+                onClick={() => setMode(m.id)}
+                disabled={!isHost}
+                className={`py-2.5 rounded-xl text-sm font-semibold transition ${
+                  mode === m.id
+                    ? "bg-red-500 text-white"
+                    : "bg-white/5 text-white/70 active:bg-white/15"
+                } ${!isHost ? "opacity-70" : ""}`}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+          <div className="flex items-center justify-between mt-2 h-7">
+            <span className="text-white/40 text-xs">
+              {MODES.find((m) => m.id === mode)?.hint}
+            </span>
+            {mode !== "one" && (
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => bump(-1)}
+                  disabled={!isHost}
+                  className="w-7 h-7 rounded-lg bg-white/10 active:bg-white/20 font-bold disabled:opacity-40"
+                >
+                  −
+                </button>
+                <span className="w-10 text-center font-bold">
+                  {count} {mode === "groups" ? "teams" : "win"}
+                </span>
+                <button
+                  onClick={() => bump(1)}
+                  disabled={!isHost}
+                  className="w-7 h-7 rounded-lg bg-white/10 active:bg-white/20 font-bold disabled:opacity-40"
+                >
+                  +
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
 
         <div className="w-full grid grid-cols-1 gap-2">
           {players.map((p) => (
             <div
               key={p.id}
               className="flex items-center gap-3 bg-white/5 rounded-xl px-4 py-3"
-              style={{ borderLeft: `4px solid ${p.color}` }}
+              style={{ borderLeft: `4px solid ${p.color}`, opacity: p.connected === false ? 0.45 : 1 }}
             >
               <span className="text-2xl">{p.emoji}</span>
               <span className="font-medium flex-1 truncate">
                 {p.name}
-                {me && p.id === me.id && (
-                  <span className="text-white/40"> (you)</span>
-                )}
+                {me && p.id === me.id && <span className="text-white/40"> (you)</span>}
+                {p.connected === false && <span className="text-white/30 text-xs"> · away</span>}
               </span>
               {p.isHost && (
-                <span className="text-xs bg-white/10 rounded-full px-2 py-0.5">
-                  host
-                </span>
+                <span className="text-xs bg-white/10 rounded-full px-2 py-0.5">host</span>
               )}
             </div>
           ))}

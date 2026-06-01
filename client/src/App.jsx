@@ -1,15 +1,15 @@
 import { useEffect, useState, useCallback, useRef } from "react";
-import { socket } from "./socket";
+import { socket, getPlayerId, syncClock } from "./socket";
 import { useWakeLock } from "./useWakeLock";
 import HomeScreen from "./screens/HomeScreen.jsx";
 import LobbyScreen from "./screens/LobbyScreen.jsx";
 import CountdownScreen from "./screens/CountdownScreen.jsx";
 import ArenaScreen from "./screens/ArenaScreen.jsx";
 
+const PLAYER_ID = getPlayerId();
+
 export default function App() {
   // screen: "home" | "lobby" | "countdown" | "arena"
-  // The arena covers both holding/selecting and the result reveal, so the
-  // winner flood animates seamlessly without a screen swap.
   const [screen, setScreen] = useState("home");
   const [connected, setConnected] = useState(socket.connected);
   const [error, setError] = useState("");
@@ -18,44 +18,72 @@ export default function App() {
   const [me, setMe] = useState(null); // { id, name, emoji, color }
   const [players, setPlayers] = useState([]);
   const [hostId, setHostId] = useState(null);
+  const [config, setConfig] = useState({ mode: "one", count: 1 });
 
   const [countdown, setCountdown] = useState(3);
   const [ready, setReady] = useState({ readyCount: 0, totalCount: 0, readyIds: [] });
-  // suspense: drives the synchronized ring-sweep on every device.
-  const [suspense, setSuspense] = useState(null); // { startedAt, durationMs } | null
-  const [result, setResult] = useState(null); // { chosenPlayerId, ... } | null
+  const [suspense, setSuspense] = useState(null); // { startAt, durationMs } (server time)
+  const [result, setResult] = useState(null);
   const [history, setHistory] = useState([]);
 
-  // Live puck positions, kept in a ref (NOT state) so 20Hz network updates never
-  // re-render React — the canvas rAF loop reads this directly.
-  // posRef.current = Map<playerId, { tx, ty }>  (normalized target positions)
+  // Live puck positions (normalized targets), in a ref so 20Hz updates never
+  // re-render React — the canvas rAF loop reads this directly. Keyed by playerId.
   const posRef = useRef(new Map());
+
+  // Mirror room/me for the reconnect handler (avoids stale closures).
+  const sessionRef = useRef({ roomCode: "", joined: false });
 
   const isHost = me && hostId && me.id === hostId;
   const sessionActive = ["lobby", "countdown", "arena"].includes(screen);
   useWakeLock(sessionActive);
 
+  // ---- apply a full server snapshot (join / rejoin / late-join) -------------
+  const applySnapshot = useCallback((snap) => {
+    setRoomCode(snap.roomCode);
+    setMe(snap.you);
+    setHostId(snap.hostId);
+    setConfig({ mode: snap.mode, count: snap.count });
+    setPlayers(snap.players);
+    setHistory(snap.history || []);
+    sessionRef.current = { roomCode: snap.roomCode, joined: true };
+
+    // Seed positions.
+    const m = posRef.current;
+    m.clear();
+    for (const p of snap.players) m.set(p.id, { tx: p.x ?? 0.5, ty: p.y ?? 0.5 });
+
+    // Resume the correct screen for the live phase.
+    if (snap.state === "countdown") setScreen("countdown");
+    else if (snap.state === "selecting" || snap.state === "result") {
+      setResult(snap.state === "result" ? snap.result : null);
+      setScreen("arena");
+    } else setScreen("lobby");
+  }, []);
+
   // ---- socket lifecycle ----------------------------------------------------
   useEffect(() => {
     const onConnect = () => {
       setConnected(true);
-      // Our socket id changes on reconnect; keep `me.id` in sync.
-      setMe((m) => (m ? { ...m, id: socket.id } : m));
+      syncClock();
+      // Reconnect/refresh -> rebind to our existing slot.
+      const s = sessionRef.current;
+      if (s.joined && s.roomCode) {
+        socket.emit("rejoin", { playerId: PLAYER_ID, roomCode: s.roomCode }, (res) => {
+          if (res?.ok) applySnapshot(res.snapshot);
+        });
+      }
     };
     const onDisconnect = () => setConnected(false);
 
-    const onLobbyUpdate = ({ players, hostId }) => {
+    const onLobbyUpdate = ({ players, hostId, mode, count }) => {
       setPlayers(players);
       setHostId(hostId);
-      // Seed/refresh target positions for any player we don't track yet, from the
-      // server snapshot (handles late-joiners and reconnects).
+      if (mode) setConfig({ mode, count });
       const m = posRef.current;
       const live = new Set();
       for (const p of players) {
         live.add(p.id);
-        if (!m.has(p.id)) {
-          m.set(p.id, { tx: p.x ?? 0.5, ty: p.y ?? 0.5 });
-        }
+        if (!m.has(p.id)) m.set(p.id, { tx: p.x ?? 0.5, ty: p.y ?? 0.5 });
       }
       for (const id of [...m.keys()]) if (!live.has(id)) m.delete(id);
     };
@@ -76,26 +104,20 @@ export default function App() {
     };
     const onReadyUpdate = (payload) => setReady(payload);
     const onPlayerMoved = ({ id, x, y }) => {
-      if (id === socket.id) return; // my own echo — I render locally (prediction)
+      if (id === PLAYER_ID) return; // my own echo — I render locally (prediction)
       const m = posRef.current;
       const cur = m.get(id);
-      if (cur) {
-        cur.tx = x;
-        cur.ty = y;
-      } else {
-        m.set(id, { tx: x, ty: y });
-      }
+      if (cur) { cur.tx = x; cur.ty = y; }
+      else m.set(id, { tx: x, ty: y });
     };
-    const onSuspenseStarted = ({ durationMs }) => {
-      setSuspense({ startedAt: Date.now(), durationMs });
-    };
+    const onSuspenseStarted = ({ startAt, durationMs }) =>
+      setSuspense({ startAt, durationMs });
     const onSuspenseCancelled = () => setSuspense(null);
     const onRoundResult = (payload) => {
       setSuspense(null);
       setResult(payload);
       if (payload.history) setHistory(payload.history);
       setScreen("arena");
-      if (navigator.vibrate) navigator.vibrate([40, 60, 160]);
     };
     const onLobbyReset = () => {
       setResult(null);
@@ -105,11 +127,7 @@ export default function App() {
     };
     const onHostChanged = ({ hostId }) => setHostId(hostId);
     const onLobbyClosed = ({ reason }) => {
-      setError(
-        reason === "expired"
-          ? "Lobby expired due to inactivity."
-          : "The lobby was closed."
-      );
+      setError(reason === "expired" ? "Lobby expired due to inactivity." : "The lobby was closed.");
       resetToHome();
     };
 
@@ -128,6 +146,22 @@ export default function App() {
     socket.on("host_changed", onHostChanged);
     socket.on("lobby_closed", onLobbyClosed);
 
+    if (socket.connected) syncClock();
+
+    // Tab returns to foreground -> re-sync clock + re-pull fresh state.
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      if (!socket.connected) return;
+      syncClock();
+      const s = sessionRef.current;
+      if (s.joined && s.roomCode) {
+        socket.emit("rejoin", { playerId: PLAYER_ID, roomCode: s.roomCode }, (res) => {
+          if (res?.ok) applySnapshot(res.snapshot);
+        });
+      }
+    };
+    document.addEventListener("visibilitychange", onVisible);
+
     return () => {
       socket.off("connect", onConnect);
       socket.off("disconnect", onDisconnect);
@@ -143,10 +177,12 @@ export default function App() {
       socket.off("lobby_reset", onLobbyReset);
       socket.off("host_changed", onHostChanged);
       socket.off("lobby_closed", onLobbyClosed);
+      document.removeEventListener("visibilitychange", onVisible);
     };
-  }, []);
+  }, [applySnapshot]);
 
   const resetToHome = useCallback(() => {
+    sessionRef.current = { roomCode: "", joined: false };
     setScreen("home");
     setRoomCode("");
     setMe(null);
@@ -160,39 +196,31 @@ export default function App() {
   // ---- actions -------------------------------------------------------------
   const createLobby = useCallback((hostName, emoji, color) => {
     setError("");
-    socket.emit("create_lobby", { hostName, emoji, color }, (res) => {
-      if (!res?.ok) {
-        setError(res?.error || "Could not create lobby");
-        return;
+    socket.emit(
+      "create_lobby",
+      { playerId: PLAYER_ID, hostName, emoji, color, mode: "one", count: 1 },
+      (res) => {
+        if (!res?.ok) return setError(res?.error || "Could not create lobby");
+        applySnapshot(res.snapshot);
       }
-      setRoomCode(res.roomCode);
-      setMe(res.you);
-      setHostId(res.you.id);
-      setScreen("lobby");
-    });
-  }, []);
+    );
+  }, [applySnapshot]);
 
   const joinLobby = useCallback((code, playerName, emoji, color) => {
     setError("");
     socket.emit(
       "join_lobby",
-      { roomCode: code, playerName, emoji, color },
+      { playerId: PLAYER_ID, roomCode: code, playerName, emoji, color },
       (res) => {
-        if (!res?.ok) {
-          setError(res?.error || "Could not join lobby");
-          return;
-        }
-        setRoomCode(res.roomCode);
-        setMe(res.you);
-        setHistory(res.history || []);
-        setScreen("lobby");
+        if (!res?.ok) return setError(res?.error || "Could not join lobby");
+        applySnapshot(res.snapshot);
       }
     );
-  }, []);
+  }, [applySnapshot]);
 
+  const setMode = useCallback((mode, count) => socket.emit("set_mode", { mode, count }), []);
   const startRound = useCallback(() => socket.emit("start_round"), []);
   const playAgain = useCallback(() => socket.emit("play_again"), []);
-  // Throttled in ArenaScreen; here we just forward to the server.
   const sendMove = useCallback((x, y) => socket.emit("move", { x, y }), []);
   const setReadyState = useCallback((isReady) => {
     socket.emit(isReady ? "player_ready" : "player_unready");
@@ -212,12 +240,7 @@ export default function App() {
       )}
 
       {screen === "home" && (
-        <HomeScreen
-          onCreate={createLobby}
-          onJoin={joinLobby}
-          error={error}
-          connected={connected}
-        />
+        <HomeScreen onCreate={createLobby} onJoin={joinLobby} error={error} connected={connected} />
       )}
 
       {screen === "lobby" && (
@@ -227,14 +250,14 @@ export default function App() {
           me={me}
           isHost={isHost}
           history={history}
+          config={config}
+          onSetMode={setMode}
           onStart={startRound}
           onLeave={leaveLobby}
         />
       )}
 
-      {screen === "countdown" && (
-        <CountdownScreen countdown={countdown} me={me} />
-      )}
+      {screen === "countdown" && <CountdownScreen countdown={countdown} me={me} />}
 
       {screen === "arena" && (
         <ArenaScreen
@@ -245,6 +268,7 @@ export default function App() {
           result={result}
           isHost={isHost}
           history={history}
+          config={config}
           positions={posRef}
           onReadyChange={setReadyState}
           onMove={sendMove}

@@ -1,34 +1,41 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import confetti from "canvas-confetti";
+import { serverTime } from "../socket";
+import {
+  unlock,
+  startTone,
+  stopTone,
+  stopAllTones,
+  playReveal,
+  setMuted,
+  isMuted,
+  noteFor,
+} from "../audio";
 
-// The shared live "stage". Every player is a small Chwazi-style puck (white halo
-// + colored disc + emoji + name). You can DRAG your own puck anywhere; its
-// normalized position streams to everyone (~20Hz) and remote pucks are smoothly
-// interpolated, leaving a fading color trail behind movement. Holding a finger
-// down (a press without much drag still counts) marks you ready; when everyone
-// is ready the server starts a synchronized suspense sweep and then floods the
-// winner's color across the screen.
+// The shared live "stage", rebuilt to feel like the original Chwazi. Every player
+// is a Chwazi-style puck (white halo + colored disc + emoji) that gently breathes
+// and shows a rotating ring while waiting. You DRAG your own puck and HOLD it to
+// join the pick; positions stream to everyone (~20Hz, interpolated). When all are
+// holding, a synchronized suspense ring fills on every device (clock-synced to
+// server time) and then the winner's color floods the screen — exactly like
+// pressing fingers on one phone, but across the network.
 //
-// Positions are normalized 0..1 so every device renders the same relative layout.
-// All hot state lives in refs read by one rAF loop — network updates never
-// re-render React.
+// Modes: "one" (single winner, color flood), "multiple" (N winners, stage dims),
+// "groups" (split into N teams, pucks recolor).
 
-const REVEAL_MS = 900; // winner color floods the screen
-const LOSER_FADE_MS = 280; // losers shrink + fade
+const BG = "#212121"; // Chwazi dark stage (matches body / reveal mask)
 const SEND_MS = 50; // ~20Hz position send
 const MOVE_EPS = 0.003; // min normalized move before we send
 const LERP = 0.25; // remote puck smoothing per frame
-// Smoke-puff trail: dense overlapping blobs that expand & fade, drawn additively
-// for crisp, vivid color near the puck.
-const TRAIL_MS = 620; // a puff lives this long
-const TRAIL_MAX = 34; // max puffs kept per puck
-const TRAIL_MIN_DIST = 0.0016; // emit a new puff after this much movement (dense)
+const GROW_MS = 120; // bloom-in when a puck appears
+const PULSE_MS = 1100; // gentle radius breathing period
+// Smoke-puff trail behind moving pucks.
+const TRAIL_MS = 600;
+const TRAIL_MAX = 30;
+const TRAIL_MIN_DIST = 0.0018;
 
-function easeOutCubic(t) {
-  return 1 - Math.pow(1 - t, 3);
-}
+const easeOutCubic = (t) => 1 - Math.pow(1 - t, 3);
 
-// "#rrggbb" + alpha (0..1) -> "rgba(r,g,b,a)" for gradient stops.
 function hexA(hex, a) {
   let h = hex.replace("#", "");
   if (h.length === 3) h = h.split("").map((c) => c + c).join("");
@@ -45,56 +52,77 @@ export default function ArenaScreen({
   suspense,
   result,
   isHost,
-  history,
-  positions, // ref: Map<id, { tx, ty }>  (network targets for remote pucks)
+  config,
+  positions, // ref: Map<id,{tx,ty}>
   onReadyChange,
   onMove,
   onPlayAgain,
   onLeave,
 }) {
   const canvasRef = useRef(null);
-  const resultStartRef = useRef(0);
+  const [muted, setMutedState] = useState(isMuted());
 
-  // Latest props for the rAF loop.
   const stateRef = useRef({});
   stateRef.current = { me, players, ready, suspense, result };
 
-  // My own puck position (normalized) — client-side prediction, rendered raw.
   const myPosRef = useRef({ x: 0.5, y: 0.5 });
-  // Rendered (interpolated) positions per id, normalized.
-  const renderRef = useRef(new Map());
-  // Trails per id: array of { nx, ny, t }.
+  const renderRef = useRef(new Map()); // interpolated remote positions
   const trailRef = useRef(new Map());
-  // Drag + hold tracking.
+  const seenRef = useRef(new Map()); // id -> first-seen time (for grow-in)
   const dragRef = useRef({ active: false, pointerId: null, offX: 0, offY: 0 });
   const holdRef = useRef(false);
-  const currentRRef = useRef(40); // last drawn puck radius (logical px)
+  const currentRRef = useRef(40);
+  const revealDoneRef = useRef(false);
 
-  // Seed my position from the roster (e.g. after join/reconnect).
+  // Seed my position from the roster (after join/reconnect).
   useEffect(() => {
     if (!me) return;
     const mine = players.find((p) => p.id === me.id);
-    if (mine && typeof mine.x === "number") {
-      myPosRef.current = { x: mine.x, y: mine.y };
-    }
+    if (mine && typeof mine.x === "number") myPosRef.current = { x: mine.x, y: mine.y };
   }, [me, players]);
 
-  // Result: stamp clock + celebrate once.
+  // ---- audio: a warm tone per holding finger (the "jam session") -----------
+  const noteIndex = (id) => {
+    const ids = players.map((p) => p.id).sort();
+    const i = ids.indexOf(id);
+    return i < 0 ? 0 : i;
+  };
+  useEffect(() => {
+    if (result) return; // tones stop at reveal (handled below)
+    const readyIds = new Set(ready.readyIds || []);
+    // start tones for newly-holding players
+    for (const id of readyIds) startTone(id, noteFor(noteIndex(id)));
+    // stop tones for players who let go
+    for (const p of players) if (!readyIds.has(p.id)) stopTone(p.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready.readyIds, result]);
+
+  // ---- result: chime + confetti + stop the hum -----------------------------
   useEffect(() => {
     if (result) {
-      resultStartRef.current = performance.now();
-      const isMe = me && result.chosenPlayerId === me.id;
-      confetti({
-        particleCount: isMe ? 160 : 110,
-        spread: 85,
-        origin: { y: 0.45 },
-        colors: result.chosenColor ? [result.chosenColor] : undefined,
-      });
-      if (navigator.vibrate) navigator.vibrate(isMe ? [60, 50, 120] : 60);
+      stopAllTones();
+      if (!revealDoneRef.current) {
+        revealDoneRef.current = true;
+        const amWinner =
+          (result.winners || []).some((w) => me && w.id === me.id) || false;
+        const floodColor =
+          (result.winners && result.winners[0] && result.winners[0].color) || "#ef5350";
+        playReveal();
+        if (navigator.vibrate) navigator.vibrate(200);
+        confetti({
+          particleCount: amWinner ? 170 : 110,
+          spread: 88,
+          origin: { y: 0.45 },
+          colors: result.mode === "groups" ? undefined : [floodColor],
+        });
+      }
     } else {
-      resultStartRef.current = 0;
+      revealDoneRef.current = false;
     }
+    return () => {};
   }, [result, me]);
+
+  useEffect(() => () => stopAllTones(), []);
 
   // ---- throttled position send --------------------------------------------
   const sendStateRef = useRef({ lastAt: 0, lastX: -1, lastY: -1, timer: null });
@@ -144,23 +172,24 @@ export default function ArenaScreen({
       const w = canvas.clientWidth;
       const h = canvas.clientHeight;
       const now = performance.now();
+      const st = serverTime();
       const readyIds = (ready && ready.readyIds) || [];
       ctx.clearRect(0, 0, w, h);
 
       const ps = [...players].sort((a, b) => (a.id < b.id ? -1 : 1));
       const n = ps.length || 1;
 
-      // Smaller pucks (research-tuned), responsive to room size.
-      const baseR = Math.min(w, h) * (n <= 2 ? 0.075 : n <= 6 ? 0.06 : 0.045);
-      const R = Math.max(20, Math.min(baseR, 52));
+      // Responsive puck radius (fraction of min dimension, like the original),
+      // shrinking as the table fills.
+      const frac = n <= 2 ? 0.085 : n <= 4 ? 0.07 : n <= 8 ? 0.055 : 0.045;
+      const R = Math.max(22, Math.min(Math.min(w, h) * frac, 64));
       currentRRef.current = R;
 
       const render = renderRef.current;
-      const targets = positions.current; // Map<id,{tx,ty}>
+      const targets = positions.current;
       const trails = trailRef.current;
+      const seen = seenRef.current;
 
-      // Resolve each puck's normalized position: mine = predicted raw; others =
-      // lerp toward network target. Seed rendered from target on first sight.
       const posOf = (p) => {
         if (me && p.id === me.id) return myPosRef.current;
         let r = render.get(p.id);
@@ -168,20 +197,53 @@ export default function ArenaScreen({
         if (!r) {
           r = { x: t.tx, y: t.ty };
           render.set(p.id, r);
+        } else if (Math.hypot(t.tx - r.x, t.ty - r.y) > 0.3) {
+          r.x = t.tx;
+          r.y = t.ty;
         } else {
-          // Snap on big jumps (teleport/rejoin), else smooth.
-          if (Math.hypot(t.tx - r.x, t.ty - r.y) > 0.3) {
-            r.x = t.tx;
-            r.y = t.ty;
-          } else {
-            r.x += (t.tx - r.x) * LERP;
-            r.y += (t.ty - r.y) * LERP;
-          }
+          r.x += (t.tx - r.x) * LERP;
+          r.y += (t.ty - r.y) * LERP;
         }
         return r;
       };
 
-      // Update trails (skip during result — the reveal owns the screen).
+      // grow-in bookkeeping
+      for (const p of ps) if (!seen.has(p.id)) seen.set(p.id, now);
+      const growth = (id) => Math.min(1, (now - (seen.get(id) || now)) / GROW_MS);
+
+      // result lookups
+      const winners = result && result.winners ? result.winners : null;
+      const winnerSet = winners ? new Set(winners.map((wv) => wv.id)) : null;
+      const groups = result && result.groups ? result.groups : null;
+      const groupMap = groups ? new Map(groups.map((gv) => [gv.id, gv])) : null;
+      const colorOf = (p) => (groupMap && groupMap.get(p.id) ? groupMap.get(p.id).color : p.color);
+
+      // === SINGLE-WINNER FLOOD ============================================
+      if (result && result.mode === "one" && winners && winners[0]) {
+        const wp = ps.find((p) => p.id === winners[0].id);
+        const wpos = wp ? posOf(wp) : { x: 0.5, y: 0.5 };
+        const wx = wpos.x * w;
+        const wy = wpos.y * h;
+        const revealP = Math.min(1, Math.max(0, (st - result.revealAt) / result.durationMs));
+        const e = easeOutCubic(revealP);
+        // flood whole stage with winner color
+        ctx.fillStyle = winners[0].color;
+        ctx.fillRect(0, 0, w, h);
+        // shrinking dark mask centered on winner -> color floods inward
+        const maxDim = Math.hypot(w, h);
+        const maskR = (1 - e) * maxDim + R * 1.7;
+        ctx.beginPath();
+        ctx.arc(wx, wy, maskR, 0, Math.PI * 2);
+        ctx.fillStyle = BG;
+        ctx.fill();
+        // winner puck sits in the dark disc
+        if (wp) drawPuck(ctx, wp, wx, wy, R, winners[0].color, 1, 1 + 0.05 * e, true, st);
+        raf = requestAnimationFrame(draw);
+        return;
+      }
+
+      // === MULTIPLE-WINNER / NORMAL / GROUPS ==============================
+      // smoke trails (only while playing, not during reveal)
       if (!result) {
         for (const p of ps) {
           const pos = posOf(p);
@@ -191,53 +253,12 @@ export default function ArenaScreen({
             trails.set(p.id, arr);
           }
           const last = arr[arr.length - 1];
-          if (
-            !last ||
-            Math.hypot(pos.x - last.nx, pos.y - last.ny) >= TRAIL_MIN_DIST
-          ) {
+          if (!last || Math.hypot(pos.x - last.nx, pos.y - last.ny) >= TRAIL_MIN_DIST) {
             arr.push({ nx: pos.x, ny: pos.y, t: now });
             if (arr.length > TRAIL_MAX) arr.shift();
           }
           while (arr.length && now - arr[0].t > TRAIL_MS) arr.shift();
         }
-      } else {
-        trails.clear();
-      }
-
-      // ---- result reveal flood (from winner's position) ------------------
-      let revealP = 0;
-      let winner = null;
-      if (result) {
-        winner = ps.find((p) => p.id === result.chosenPlayerId) || null;
-        revealP = Math.min(1, (now - resultStartRef.current) / REVEAL_MS);
-        const wp = winner ? posOf(winner) : { x: 0.5, y: 0.5 };
-        const wx = wp.x * w;
-        const wy = wp.y * h;
-        const maxR = Math.hypot(w, h);
-        ctx.save();
-        ctx.beginPath();
-        ctx.arc(wx, wy, easeOutCubic(revealP) * maxR, 0, Math.PI * 2);
-        ctx.fillStyle = result.chosenColor || "#ef4444";
-        ctx.globalAlpha = 0.92;
-        ctx.fill();
-        ctx.restore();
-      }
-
-      // ---- suspense sweep ------------------------------------------------
-      let sweepP = 0;
-      if (suspense) {
-        sweepP = Math.min(
-          1,
-          (Date.now() - suspense.startedAt) / suspense.durationMs
-        );
-      }
-
-      // ---- smoke trails (under pucks) ------------------------------------
-      // Each trail point is rendered as a soft radial puff. Puffs grow as they
-      // age and fade out, and we composite with "lighter" so overlapping puffs
-      // of the same hue stay vivid/crisp rather than muddy — a thick, glowing
-      // smoke ribbon concentrated right behind the puck.
-      if (!result) {
         ctx.save();
         ctx.globalCompositeOperation = "lighter";
         for (const p of ps) {
@@ -247,15 +268,13 @@ export default function ArenaScreen({
             const pt = arr[i];
             const age = now - pt.t;
             if (age > TRAIL_MS) continue;
-            const life = 1 - age / TRAIL_MS; // 1 fresh → 0 old
-            const headFrac = (i + 1) / arr.length; // newer = bigger/brighter
-            // Puff radius: starts compact near the puck, expands a bit as it ages.
+            const life = 1 - age / TRAIL_MS;
+            const headFrac = (i + 1) / arr.length;
             const rad = R * (0.55 + (1 - life) * 0.9) * (0.5 + 0.5 * headFrac);
             const px = pt.nx * w;
             const py = pt.ny * h;
             const g = ctx.createRadialGradient(px, py, 0, px, py, rad);
-            // Crisp saturated core, soft transparent edge.
-            const coreA = 0.42 * life * (0.45 + 0.55 * headFrac);
+            const coreA = 0.4 * life * (0.45 + 0.55 * headFrac);
             g.addColorStop(0, hexA(p.color, coreA));
             g.addColorStop(0.55, hexA(p.color, coreA * 0.5));
             g.addColorStop(1, hexA(p.color, 0));
@@ -266,91 +285,140 @@ export default function ArenaScreen({
           }
         }
         ctx.restore();
+      } else {
+        trails.clear();
       }
 
-      // ---- pucks ----------------------------------------------------------
+      // multi-winner: dim the stage so winners pop
+      let revealP = 0;
+      if (result && result.mode === "multiple") {
+        revealP = Math.min(1, Math.max(0, (st - result.revealAt) / result.durationMs));
+        ctx.fillStyle = `rgba(15,15,15,${0.72 * easeOutCubic(revealP)})`;
+        ctx.fillRect(0, 0, w, h);
+      } else if (result && result.mode === "groups") {
+        revealP = Math.min(1, Math.max(0, (st - result.revealAt) / result.durationMs));
+      }
+
+      // suspense sweep progress (clock-synced)
+      let sweepP = 0;
+      if (suspense) sweepP = Math.min(1, Math.max(0, (st - suspense.startAt) / suspense.durationMs));
+
+      // pucks
       ps.forEach((p) => {
         const pos = posOf(p);
         const px = pos.x * w;
         const py = pos.y * h;
         const isReady = readyIds.includes(p.id);
-        const isWinner = winner && p.id === winner.id;
+        const g = growth(p.id);
 
-        let scale = 1;
-        let alpha = 1;
+        let scale = g;
+        let alpha = g;
+
         if (result) {
-          if (isWinner) {
-            scale = 1 + 0.14 * easeOutCubic(Math.min(1, revealP * 1.5));
-          } else {
-            const t = Math.min(1, (now - resultStartRef.current) / LOSER_FADE_MS);
-            scale = 1 - 0.85 * easeOutCubic(t);
-            alpha = 1 - easeOutCubic(t);
+          if (result.mode === "multiple") {
+            if (winnerSet.has(p.id)) {
+              scale = 1 + 0.12 * easeOutCubic(revealP);
+              alpha = 1;
+            } else {
+              const e = easeOutCubic(revealP);
+              scale = 1 - 0.85 * e;
+              alpha = 1 - e;
+            }
+          } else if (result.mode === "groups") {
+            scale = 1 + 0.04 * Math.sin(now / 400);
+            alpha = 1;
           }
-        } else if (!isReady) {
-          alpha = 0.5;
-          scale = 0.94;
+        } else {
+          // idle/waiting: gentle breathing pulse + dim if not holding
+          const pulse = 1 + 0.035 * Math.sin((now / PULSE_MS) * Math.PI * 2 + noteIndex(p.id));
+          scale = g * pulse;
+          if (!isReady) alpha = g * 0.55;
         }
         if (alpha <= 0.01) return;
+        const col = colorOf(p);
         const r = R * scale;
+        const isWin = winnerSet && winnerSet.has(p.id);
 
-        ctx.save();
-        ctx.globalAlpha = alpha;
+        drawPuck(ctx, p, px, py, r / scale, col, alpha, scale, isWin, st);
 
-        // White halo puck.
-        ctx.beginPath();
-        ctx.arc(px, py, r * 1.26, 0, Math.PI * 2);
-        ctx.fillStyle = "rgba(255,255,255,0.95)";
-        ctx.fill();
-
-        // Colored disc.
-        ctx.beginPath();
-        ctx.arc(px, py, r, 0, Math.PI * 2);
-        ctx.fillStyle = p.color;
-        ctx.fill();
-
-        // Suspense sweep ring (holding players, pre-result).
-        if (!result && suspense && isReady) {
-          ctx.beginPath();
-          ctx.strokeStyle = "rgba(255,255,255,0.95)";
-          ctx.lineWidth = Math.max(3, r * 0.14);
-          ctx.lineCap = "round";
-          ctx.arc(
-            px,
-            py,
-            r * 1.14,
-            -Math.PI / 2,
-            -Math.PI / 2 + Math.PI * 2 * sweepP
-          );
-          ctx.stroke();
-        } else if (!result && isReady) {
-          ctx.beginPath();
-          ctx.strokeStyle = "rgba(255,255,255,0.55)";
-          ctx.lineWidth = Math.max(2, r * 0.09);
-          ctx.arc(px, py, r * 1.14, 0, Math.PI * 2);
-          ctx.stroke();
+        // rings (only while playing)
+        if (!result) {
+          ctx.save();
+          ctx.globalAlpha = alpha;
+          if (suspense && isReady) {
+            // clock-sweep fill: shows the synchronized pick countdown
+            ctx.beginPath();
+            ctx.strokeStyle = "rgba(255,255,255,0.95)";
+            ctx.lineWidth = Math.max(3, r * 0.14);
+            ctx.lineCap = "round";
+            ctx.arc(px, py, r * 1.32, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * sweepP);
+            ctx.stroke();
+          } else {
+            // alive rotating arc-gap ring (breathes); brighter when holding
+            const t = now / 1000 + noteIndex(p.id);
+            const gap = 0.5 + 0.35 * Math.sin(t * 1.6);
+            const start = t * 1.4;
+            ctx.beginPath();
+            ctx.strokeStyle = isReady ? "rgba(255,255,255,0.85)" : "rgba(255,255,255,0.4)";
+            ctx.lineWidth = Math.max(2, r * (isReady ? 0.11 : 0.08));
+            ctx.lineCap = "round";
+            ctx.arc(px, py, r * 1.32, start, start + Math.PI * 2 - gap);
+            ctx.stroke();
+          }
+          ctx.restore();
         }
 
-        // Emoji.
-        ctx.globalAlpha = alpha;
-        ctx.font = `${Math.round(r * 1.05)}px system-ui, "Segoe UI Emoji", sans-serif`;
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.fillText(p.emoji, px, py + r * 0.04);
-
-        // Name.
-        ctx.globalAlpha = alpha;
-        ctx.font = `600 ${Math.max(11, Math.round(r * 0.4))}px system-ui, sans-serif`;
-        ctx.fillStyle = result && !isWinner ? "rgba(255,255,255,0.6)" : "#fff";
-        const label = p.name + (me && p.id === me.id ? " ·" : "");
-        ctx.fillText(label, px, py + r * 1.7);
-
-        ctx.restore();
+        // group number badge
+        if (result && result.mode === "groups" && groupMap.get(p.id)) {
+          ctx.save();
+          ctx.globalAlpha = alpha;
+          ctx.fillStyle = "rgba(255,255,255,0.95)";
+          ctx.font = `800 ${Math.round(r * 0.6)}px system-ui, sans-serif`;
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillText(String(groupMap.get(p.id).group), px, py - r * 1.55);
+          ctx.restore();
+        }
       });
 
       raf = requestAnimationFrame(draw);
     };
-    raf = requestAnimationFrame(draw);
 
+    // Puck drawing helper (kept inside effect to capture ctx conventions).
+    function drawPuck(ctx, p, px, py, baseR, color, alpha, scale, emphasized, st) {
+      const r = baseR * scale;
+      const me2 = stateRef.current.me;
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      if (emphasized) {
+        ctx.shadowColor = color;
+        ctx.shadowBlur = r * 0.9;
+      }
+      // white halo
+      ctx.beginPath();
+      ctx.arc(px, py, r * 1.18, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(255,255,255,0.96)";
+      ctx.fill();
+      // colored disc
+      ctx.beginPath();
+      ctx.arc(px, py, r, 0, Math.PI * 2);
+      ctx.fillStyle = color;
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      // emoji
+      ctx.font = `${Math.round(r * 1.05)}px system-ui, "Segoe UI Emoji", sans-serif`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(p.emoji, px, py + r * 0.04);
+      // name
+      ctx.font = `600 ${Math.max(11, Math.round(r * 0.38))}px system-ui, sans-serif`;
+      ctx.fillStyle = "#fff";
+      const label = p.name + (me2 && p.id === me2.id ? " ·" : "");
+      ctx.fillText(label, px, py + r * 1.62);
+      ctx.restore();
+    }
+
+    raf = requestAnimationFrame(draw);
     return () => {
       cancelAnimationFrame(raf);
       window.removeEventListener("resize", resize);
@@ -363,14 +431,12 @@ export default function ArenaScreen({
     const rect = canvas.getBoundingClientRect();
     const sx = canvas.clientWidth / rect.width;
     const sy = canvas.clientHeight / rect.height;
-    return {
-      x: (e.clientX - rect.left) * sx,
-      y: (e.clientY - rect.top) * sy,
-    };
+    return { x: (e.clientX - rect.left) * sx, y: (e.clientY - rect.top) * sy };
   };
 
   const onPointerDown = (e) => {
-    if (result) return; // round over
+    if (result) return;
+    unlock(); // start audio inside the user gesture
     const canvas = canvasRef.current;
     const pt = toLogical(e);
     const w = canvas.clientWidth;
@@ -379,22 +445,20 @@ export default function ArenaScreen({
     const myx = my.x * w;
     const myy = my.y * h;
     const R = currentRRef.current;
-    const grab = R * 1.5; // touch target around the puck
+    const grab = R * 1.6;
     const onMyPuck = (pt.x - myx) ** 2 + (pt.y - myy) ** 2 <= grab * grab;
+    if (!onMyPuck) return; // only the puck is interactive
 
-    // Only the puck is interactive — touching empty space does nothing.
-    if (!onMyPuck) return;
-
-    // Press on the puck = hold (marks ready) + grab for dragging.
     if (!holdRef.current) {
       holdRef.current = true;
       onReadyChange(true);
+      if (me) startTone(me.id, noteFor(noteIndex(me.id)));
       if (navigator.vibrate) navigator.vibrate(15);
     }
     dragRef.current = {
       active: true,
       pointerId: e.pointerId,
-      offX: my.x - pt.x / w, // grab offset so the puck doesn't jump
+      offX: my.x - pt.x / w,
       offY: my.y - pt.y / h,
     };
     try {
@@ -407,8 +471,7 @@ export default function ArenaScreen({
 
   const onPointerMove = (e) => {
     const d = dragRef.current;
-    if (!d.active || e.pointerId !== d.pointerId) return;
-    if (result) return;
+    if (!d.active || e.pointerId !== d.pointerId || result) return;
     const canvas = canvasRef.current;
     const w = canvas.clientWidth;
     const h = canvas.clientHeight;
@@ -422,7 +485,7 @@ export default function ArenaScreen({
     queueSend(nx, ny);
   };
 
-  const endPointer = (e) => {
+  const endPointer = () => {
     const d = dragRef.current;
     if (d.pointerId != null) {
       try {
@@ -431,24 +494,38 @@ export default function ArenaScreen({
         /* ignore */
       }
     }
-    // Flush final position.
     if (d.active) {
       const p = myPosRef.current;
       onMove(p.x, p.y);
     }
     dragRef.current = { active: false, pointerId: null, offX: 0, offY: 0 };
-    // Release the hold (un-ready).
     if (holdRef.current) {
       holdRef.current = false;
       onReadyChange(false);
+      if (me) stopTone(me.id);
     }
   };
 
-  const isMeWinner = me && result && result.chosenPlayerId === me.id;
+  const toggleMute = () => {
+    const next = !muted;
+    setMuted(next);
+    setMutedState(next);
+  };
+
   const meReady = me && (ready.readyIds || []).includes(me.id);
+  const amWinner = result && (result.winners || []).some((wv) => me && wv.id === me.id);
+  const headline = !result
+    ? null
+    : result.mode === "groups"
+    ? `${result.count} teams!`
+    : result.mode === "multiple"
+    ? `${(result.winners || []).map((wv) => wv.name).join(", ")} chosen!`
+    : amWinner
+    ? "It's you! 🎉"
+    : `${result.winners[0].name} is chosen`;
 
   return (
-    <div className="relative h-full w-full overflow-hidden">
+    <div className="relative h-full w-full overflow-hidden" style={{ background: BG }}>
       <canvas
         ref={canvasRef}
         className="absolute inset-0 w-full h-full block"
@@ -459,22 +536,27 @@ export default function ArenaScreen({
         onPointerCancel={endPointer}
       />
 
+      {/* Mute toggle */}
+      <button
+        onClick={toggleMute}
+        className="absolute top-[max(0.75rem,env(safe-area-inset-top))] right-3 z-10 w-10 h-10 rounded-full bg-white/10 active:bg-white/20 text-lg flex items-center justify-center"
+        aria-label={muted ? "Unmute" : "Mute"}
+      >
+        {muted ? "🔇" : "🔊"}
+      </button>
+
       {/* Top status */}
       <div className="pointer-events-none absolute top-0 inset-x-0 pt-[max(1rem,env(safe-area-inset-top))] text-center px-4">
         {result ? (
-          <p className="text-white text-lg font-bold drop-shadow">
-            {isMeWinner ? "It's you! 🎉" : `${result.chosenPlayerName} is chosen`}
-          </p>
+          <p className="text-white text-xl font-bold drop-shadow">{headline}</p>
         ) : suspense ? (
-          <p className="text-white/90 text-lg font-bold">Choosing…</p>
+          <p className="text-white/95 text-xl font-bold">Choosing…</p>
         ) : (
           <>
-            <p className="text-white/80 text-lg font-medium">
+            <p className="text-white/85 text-lg font-medium">
               {ready.readyCount} / {ready.totalCount} holding
             </p>
-            <p className="text-white/40 text-sm">
-              Hold your circle • drag it around
-            </p>
+            <p className="text-white/40 text-sm">Hold your circle • drag it around</p>
           </>
         )}
       </div>
@@ -491,9 +573,7 @@ export default function ArenaScreen({
                 Play again
               </button>
             ) : (
-              <p className="text-center text-white/70">
-                Waiting for host to play again…
-              </p>
+              <p className="text-center text-white/70">Waiting for host to play again…</p>
             )}
             <button onClick={onLeave} className="w-full py-2 text-white/50 text-sm">
               Leave
