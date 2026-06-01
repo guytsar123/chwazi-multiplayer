@@ -1,7 +1,7 @@
 {
-  "name": "chwazi-server",
+  "name": "choose-me-server",
   "version": "1.0.0",
-  "description": "Real-time multiplayer finger-chooser (Chwazi-style) server",
+  "description": "choose-me — real-time multiplayer finger-chooser server",
   "type": "module",
   "main": "index.js",
   "scripts": {

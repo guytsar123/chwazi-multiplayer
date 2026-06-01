@@ -12,8 +12,8 @@ import {
   noteFor,
 } from "../audio";
 
-// The shared live "stage", rebuilt to feel like the original Chwazi. Every player
-// is a Chwazi-style puck (white halo + colored disc) that gently breathes
+// The shared live "stage", rebuilt to feel like the original finger-chooser. Every
+// player is a classic puck (white halo + colored disc) that gently breathes
 // and shows a rotating ring while waiting. You DRAG your own puck and HOLD it to
 // join the pick; positions stream to everyone (~20Hz, interpolated). When all are
 // holding, a synchronized suspense ring fills on every device (clock-synced to
@@ -23,7 +23,7 @@ import {
 // Modes: "one" (single winner, color flood), "multiple" (N winners, stage dims),
 // "groups" (split into N teams, pucks recolor).
 
-const BG = "#212121"; // Chwazi dark stage (matches body / reveal mask)
+const BG = "#212121"; // dark stage (matches body / reveal mask)
 const SEND_MS = 50; // ~20Hz position send
 const MOVE_EPS = 0.003; // min normalized move before we send
 const LERP = 0.25; // remote puck smoothing per frame

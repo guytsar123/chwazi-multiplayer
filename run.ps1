@@ -1,4 +1,4 @@
-# Chwazi multiplayer — one-click launcher.
+# choose-me — one-click launcher.
 # Uses the portable Node install and serves the built client from the Express
 # server on port 3001. On your phone (same Wi-Fi) open http://<this-pc-ip>:3001
 #

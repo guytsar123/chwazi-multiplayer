@@ -19,11 +19,11 @@ export const SERVER_URL = resolveServerUrl();
 // Stable per-browser identity that survives refresh/reconnect, so the server can
 // rebind us to the same player slot instead of creating a duplicate.
 export function getPlayerId() {
-  let id = localStorage.getItem("chwazi_pid");
+  let id = localStorage.getItem("chooseme_pid");
   if (!id) {
     id = (crypto.randomUUID && crypto.randomUUID()) ||
       `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    localStorage.setItem("chwazi_pid", id);
+    localStorage.setItem("chooseme_pid", id);
   }
   return id;
 }

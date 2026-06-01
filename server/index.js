@@ -11,12 +11,12 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3001;
 
 // ---------------------------------------------------------------------------
-// Tunable timing / rules (tuned to the original Chwazi feel)
+// Tunable timing / rules (tuned to the original finger-chooser feel)
 // ---------------------------------------------------------------------------
 const COUNTDOWN_SECONDS = 3; // 3...2...1 sync cue before everyone holds
 const SELECT_TIMEOUT_MS = 20000; // max wait for everyone to hold their finger
-const SUSPENSE_MS = 2500; // hold-to-pick duration (Chwazi ~2.5s)
-const REVEAL_MS = 1000; // winner color-flood duration (Chwazi WinnerAnimation)
+const SUSPENSE_MS = 2500; // hold-to-pick duration (~2.5s)
+const REVEAL_MS = 1000; // winner color-flood duration
 const RECONNECT_GRACE_MS = 20000; // keep a slot alive this long after a drop
 const LOBBY_TTL_MS = 30 * 60 * 1000; // 30 min of inactivity -> cleanup
 const MIN_PLAYERS = 2;
@@ -58,7 +58,7 @@ const lobbies = new Map();
 
 const CODE_CHARS = "0123456789"; // digits only — easy to type/share
 // Bright, saturated palette (Material-400 family) on a dark stage — the modern
-// Chwazi look. Players may also pick their own; these are the auto-assign pool.
+// modern look. Players may also pick their own; these are the auto-assign pool.
 const COLORS = [
   "#ef5350", "#ec407a", "#ab47bc", "#7e57c2", "#5c6bc0",
   "#29b6f6", "#26a69a", "#66bb6a", "#9ccc65", "#ffee58",
@@ -570,10 +570,10 @@ const clientDist = path.join(__dirname, "..", "client", "dist");
 app.use(express.static(clientDist));
 app.get("*", (_req, res) => {
   res.sendFile(path.join(clientDist, "index.html"), (err) => {
-    if (err) res.status(200).send("Chwazi server running. Build the client to serve it here.");
+    if (err) res.status(200).send("choose-me server running. Build the client to serve it here.");
   });
 });
 
 httpServer.listen(PORT, "0.0.0.0", () => {
-  console.log(`Chwazi server listening on http://0.0.0.0:${PORT}`);
+  console.log(`choose-me server listening on http://0.0.0.0:${PORT}`);
 });
